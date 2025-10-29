@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.20;
+
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Burnable.sol";
+import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
+import "@openzeppelin/contracts/token/common/ERC2981.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "../libraries/AssetTypes.sol";
+
+/**
+ * @title VertixNFT1155
+ * @notice ERC-1155 multi-edition NFT template with royalties
+ * @dev Used for gaming items, limited editions, fractional ownership
+ */
+contract VertixNFT1155 is
+    ERC1155,
+    ERC1155Burnable,
+    ERC1155Supply,
+    ERC2981,
+    Ownable,
+    Pausable
+{
+    // ============================================
+    // STATE VARIABLES
+    // ============================================
+
+    string public name;
+    string public symbol;
+    uint256 private _tokenIdCounter;
+
+    mapping(uint256 => string) public tokenURIs;
+    mapping(uint256 => uint256) public tokenMaxSupply;
+
+    // ============================================
+    // CONSTRUCTOR
+    // ============================================
+
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        string memory uri_,
+        address creator_,
+        address royaltyReceiver_,
+        uint96 royaltyFeeBps_
+    ) ERC1155(uri_) Ownable(creator_) {
+        name = name_;
+        symbol = symbol_;
+
+        if (royaltyFeeBps_ > 0) {
+            _setDefaultRoyalty(royaltyReceiver_, royaltyFeeBps_);
+        }
+    }
+
+    // ============================================
+    //            MINTING
+    // ============================================
+
+    function create(
+        uint256 initialSupply,
+        string memory tokenURI,
+        uint256 maxSupply_
+    ) external onlyOwner returns (uint256 tokenId) {
+        tokenId = _tokenIdCounter++;
+
+        tokenURIs[tokenId] = tokenURI;
+        tokenMaxSupply[tokenId] = maxSupply_;
+
+        if (initialSupply > 0) {
+            _mint(msg.sender, tokenId, initialSupply, "");
+        }
+
+        return tokenId;
+    }
+
+    function mint(
+        address to,
+        uint256 tokenId,
+        uint256 amount
+    ) external onlyOwner whenNotPaused {
+        require(tokenId < _tokenIdCounter, "Token doesn't exist");
+
+        uint256 maxSupply_ = tokenMaxSupply[tokenId];
+        if (maxSupply_ > 0) {
+            require(
+                totalSupply(tokenId) + amount <= maxSupply_,
+                "Max supply reached"
+            );
+        }
+
+        _mint(to, tokenId, amount, "");
+    }
+
+    function mintBatch(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    ) external onlyOwner whenNotPaused {
+        _mintBatch(to, tokenIds, amounts, "");
+    }
+
+    // ============================================
+    //            URI
+    // ============================================
+
+    function uri(uint256 tokenId) public view override returns (string memory) {
+        return tokenURIs[tokenId];
+    }
+
+    function setURI(uint256 tokenId, string memory newuri) external onlyOwner {
+        tokenURIs[tokenId] = newuri;
+    }
+
+    // ============================================
+    // ROYALTY
+    // ============================================
+
+    function setDefaultRoyalty(
+        address receiver,
+        uint96 feeBps
+    ) external onlyOwner {
+        require(feeBps <= AssetTypes.MAX_ROYALTY_BPS, "Royalty too high");
+        _setDefaultRoyalty(receiver, feeBps);
+    }
+
+    function setTokenRoyalty(
+        uint256 tokenId,
+        address receiver,
+        uint96 feeBps
+    ) external onlyOwner {
+        require(feeBps <= AssetTypes.MAX_ROYALTY_BPS, "Royalty too high");
+        _setTokenRoyalty(tokenId, receiver, feeBps);
+    }
+
+    // ============================================
+    // ADMIN
+    // ============================================
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    // ============================================
+    // OVERRIDES
+    // ============================================
+
+    function _update(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory values
+    ) internal override(ERC1155, ERC1155Supply) whenNotPaused {
+        super._update(from, to, ids, values);
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(ERC1155, ERC2981) returns (bool) {
+        return super.supportsInterface(interfaceId);
+    }
+}
