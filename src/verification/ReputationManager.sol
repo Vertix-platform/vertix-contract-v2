@@ -3,6 +3,7 @@ pragma solidity 0.8.20;
 
 import "../interfaces/IReputationManager.sol";
 import "../libraries/AssetTypes.sol";
+import "../libraries/Errors.sol";
 import "../access/RoleManager.sol";
 
 /**
@@ -56,7 +57,7 @@ contract ReputationManager is IReputationManager {
     // ============================================
 
     constructor(address _roleManager) {
-        require(_roleManager != address(0), "Invalid role manager");
+        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         roleManager = RoleManager(_roleManager);
     }
 
@@ -70,7 +71,7 @@ contract ReputationManager is IReputationManager {
      * @param action Reputation action type
      */
     function updateReputation(address user, ReputationAction action) external {
-        require(user != address(0), "Invalid user");
+        if (user == address(0)) revert Errors.InvalidUser();
 
         // Only authorized contracts can update reputation
         // In production, check msg.sender is authorized contract
@@ -78,7 +79,7 @@ contract ReputationManager is IReputationManager {
             roleManager.ADMIN_ROLE(),
             msg.sender
         ) || msg.sender == address(this); // Allow internal calls
-        require(isAuthorized, "Not authorized to update reputation");
+        if (!isAuthorized) revert Errors.NotAuthorized(msg.sender);
 
         Reputation storage rep = reputations[user];
 
@@ -129,13 +130,12 @@ contract ReputationManager is IReputationManager {
      * @param reason Ban reason
      */
     function banUser(address user, string calldata reason) external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
 
         Reputation storage rep = reputations[user];
-        require(!rep.isBanned, "Already banned");
+        if (rep.isBanned) revert Errors.AlreadyBanned(user);
 
         rep.isBanned = true;
 
@@ -147,13 +147,12 @@ contract ReputationManager is IReputationManager {
      * @param user User to unban
      */
     function unbanUser(address user) external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
 
         Reputation storage rep = reputations[user];
-        require(rep.isBanned, "Not banned");
+        if (!rep.isBanned) revert Errors.NotBanned(user);
 
         rep.isBanned = false;
 
@@ -208,52 +207,6 @@ contract ReputationManager is IReputationManager {
         return reputations[user].isBanned;
     }
 
-    /**
-     * @notice Get user statistics
-     */
-    function getUserStats(
-        address user
-    )
-        external
-        view
-        returns (
-            uint32 successfulSales,
-            uint32 successfulPurchases,
-            uint32 disputesLost,
-            uint32 disputesWon,
-            uint32 verifiedAssets
-        )
-    {
-        Reputation memory rep = reputations[user];
-        return (
-            rep.successfulSales,
-            rep.successfulPurchases,
-            rep.disputesLost,
-            rep.disputesWon,
-            rep.verifiedAssets
-        );
-    }
-
-    /**
-     * @notice Calculate success rate
-     * @return Success rate in basis points (0-10000)
-     */
-    function getSuccessRate(address user) external view returns (uint256) {
-        Reputation memory rep = reputations[user];
-
-        uint256 totalTransactions = uint256(rep.successfulSales) +
-            uint256(rep.successfulPurchases);
-        uint256 totalDisputes = uint256(rep.disputesLost) +
-            uint256(rep.disputesWon);
-
-        if (totalTransactions == 0) return 10000; // 100% for new users
-        if (totalDisputes == 0) return 10000; // 100% if no disputes
-
-        // Success rate = (total - disputes lost) / total
-        uint256 successful = totalTransactions - uint256(rep.disputesLost);
-        return (successful * 10000) / totalTransactions;
-    }
-
     // ============================================
     // INTERNAL FUNCTIONS
     // ============================================
@@ -264,17 +217,21 @@ contract ReputationManager is IReputationManager {
     function _getPointsForAction(
         ReputationAction action
     ) internal pure returns (int256) {
-        if (action == ReputationAction.SuccessfulSale)
+        if (action == ReputationAction.SuccessfulSale) {
             return POINTS_SUCCESSFUL_SALE;
-        if (action == ReputationAction.SuccessfulPurchase)
+        }
+        if (action == ReputationAction.SuccessfulPurchase) {
             return POINTS_SUCCESSFUL_PURCHASE;
-        if (action == ReputationAction.VerifiedAsset)
+        }
+        if (action == ReputationAction.VerifiedAsset) {
             return POINTS_VERIFIED_ASSET;
+        }
         if (action == ReputationAction.DisputeWon) return POINTS_DISPUTE_WON;
         if (action == ReputationAction.DisputeLost) return POINTS_DISPUTE_LOST;
         if (action == ReputationAction.FraudDetected) return POINTS_FRAUD;
-        if (action == ReputationAction.InactivityDecay)
+        if (action == ReputationAction.InactivityDecay) {
             return POINTS_INACTIVITY_DECAY;
+        }
 
         revert InvalidReputationAction();
     }

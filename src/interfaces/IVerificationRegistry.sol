@@ -220,33 +220,6 @@ interface IVerificationRegistry {
     function isExpired(uint256 verificationId) external view returns (bool);
 
     /**
-     * @notice Get time until expiration
-     * @param verificationId Verification ID
-     * @return Seconds until expiration (0 if already expired)
-     */
-    function timeUntilExpiration(
-        uint256 verificationId
-    ) external view returns (uint256);
-
-    /**
-     * @notice Check if address is whitelisted verifier
-     * @param verifier Address to check
-     * @return True if whitelisted
-     */
-    function isWhitelistedVerifier(
-        address verifier
-    ) external view returns (bool);
-
-    /**
-     * @notice Get metadata URI for verification
-     * @param verificationId Verification ID
-     * @return IPFS URI
-     */
-    function getVerificationMetadata(
-        uint256 verificationId
-    ) external view returns (string memory);
-
-    /**
      * @notice Get total verification count
      * @return Counter
      */

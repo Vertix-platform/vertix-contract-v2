@@ -13,3 +13,14 @@ docs/
 # Dotenv file
 .env
 IMPLEMENTATION.md
+
+# Coverage reports
+lcov.info
+coverage/
+
+# Gas reports
+gas-report.txt
+.gas-snapshot
+
+# Temporary files
+/tmp/

@@ -1,48 +1,94 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../interfaces/IMarketplace.sol";
-import "../interfaces/IEscrowManager.sol";
-import "../interfaces/INFTMarketplace.sol";
-import "../libraries/AssetTypes.sol";
-import "../access/RoleManager.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {IMarketplace} from "../interfaces/IMarketplace.sol";
+import {IEscrowManager} from "../interfaces/IEscrowManager.sol";
+import {INFTMarketplace} from "../interfaces/INFTMarketplace.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {Errors} from "../libraries/Errors.sol";
+import {RoleManager} from "../access/RoleManager.sol";
 
 /**
  * @title MarketplaceCore
- * @notice Main orchestrator routing listings to appropriate handlers
- * @dev Routes NFT sales to NFTMarketplace, off-chain assets to EscrowManager
+ * @notice Unified marketplace router for all asset types
+ * @dev Single entry point routing to specialized handlers
+ *
  *
  * Architecture:
- * - NFTs (ERC721/1155) → NFTMarketplace (instant atomic swaps)
- * - Social Media, Websites, etc. → EscrowManager (time-locked escrow)
- * - Single entry point for all asset types
- * - Delegates to specialized contracts
+ * - NFTs (ERC721/1155) → NFTMarketplace.executePurchase()
+ * - Off-chain assets → EscrowManager.createEscrow()
  */
 contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     using AssetTypes for AssetTypes.AssetType;
 
     // ============================================
-    // STATE VARIABLES
+    //          STORAGE STRUCTS
+    // ============================================
+
+    /**
+     * @notice NFT-specific data
+     * @dev Only populated for NFT listings, packed into 1 slot
+     */
+    struct NFTDetails {
+        address nftContract;
+        uint64 tokenId;
+        uint16 quantity;
+        AssetTypes.TokenStandard standard;
+    }
+
+    // ============================================
+    //          STATE VARIABLES
     // ============================================
 
     uint256 public listingCounter;
 
     mapping(uint256 => Listing) public listings;
+    mapping(uint256 => NFTDetails) public nftDetails;
     mapping(address => uint256[]) public sellerListings;
-    mapping(address => uint256[]) public buyerPurchases;
 
     RoleManager public immutable roleManager;
     IEscrowManager public immutable escrowManager;
     INFTMarketplace public immutable nftMarketplace;
 
-    // Track which handler manages each listing
-    mapping(uint256 => address) public listingHandler; // EscrowManager or NFTMarketplace
-    mapping(uint256 => uint256) public listingToHandlerId; // ID in handler contract
+    // ============================================
+    // EVENTS
+    // ============================================
+
+    event NFTListingCreated(
+        uint256 indexed listingId,
+        address indexed seller,
+        address indexed nftContract,
+        uint256 tokenId,
+        uint256 quantity,
+        uint256 price
+    );
+
+    event PriceUpdated(
+        uint256 indexed listingId,
+        uint256 oldPrice,
+        uint256 newPrice
+    );
 
     // ============================================
-    // CONSTRUCTOR
+    //              ERRORS
+    // ============================================
+
+    error InvalidPrice();
+    error NotOwner();
+    error NotApproved();
+    error InsufficientBalance();
+    error ListingNotActive();
+    error IncorrectPayment();
+    error CannotBuyOwnListing();
+    error NotSeller();
+    error InvalidNFTParameters();
+
+    // ============================================
+    //           CONSTRUCTOR
     // ============================================
 
     constructor(
@@ -50,9 +96,10 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         address _escrowManager,
         address _nftMarketplace
     ) {
-        require(_roleManager != address(0), "Invalid role manager");
-        require(_escrowManager != address(0), "Invalid escrow manager");
-        require(_nftMarketplace != address(0), "Invalid NFT marketplace");
+        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
+        if (_escrowManager == address(0)) revert Errors.InvalidEscrowManager();
+        if (_nftMarketplace == address(0))
+            revert Errors.InvalidNFTMarketplace();
 
         roleManager = RoleManager(_roleManager);
         escrowManager = IEscrowManager(_escrowManager);
@@ -64,26 +111,125 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     // ============================================
 
     /**
-     * @notice Create a listing (routes to appropriate handler)
-     * @param assetType Type of asset
+     * @notice Create NFT listing
+     * @param nftContract NFT contract address
+     * @param tokenId Token ID
+     * @param quantity Quantity (1 for ERC721, >1 for ERC1155)
      * @param price Listing price
-     * @param assetHash Hash of asset details
-     * @param metadataURI IPFS link to metadata
-     * @return listingId Universal listing ID
+     * @param standard Token standard
+     * @return listingId Unique listing ID
      */
-    function createListing(
-        AssetTypes.AssetType assetType,
+    function createNFTListing(
+        address nftContract,
+        uint256 tokenId,
+        uint256 quantity,
         uint256 price,
-        bytes32 assetHash,
-        string calldata metadataURI
-    ) external payable whenNotPaused nonReentrant returns (uint256 listingId) {
-        require(price > 0, "Invalid price");
-        assetType.validateAssetType();
+        AssetTypes.TokenStandard standard
+    ) external whenNotPaused nonReentrant returns (uint256 listingId) {
+        if (price == 0 || price > AssetTypes.MAX_LISTING_PRICE) {
+            revert InvalidPrice();
+        }
+        if (nftContract == address(0)) {
+            revert InvalidNFTParameters();
+        }
+
+        // Verify ownership and approval
+        if (standard == AssetTypes.TokenStandard.ERC721) {
+            if (quantity != 1) revert InvalidNFTParameters();
+            if (IERC721(nftContract).ownerOf(tokenId) != msg.sender) {
+                revert NotOwner();
+            }
+            address approved = IERC721(nftContract).getApproved(tokenId);
+            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(
+                msg.sender,
+                address(this)
+            );
+            if (approved != address(this) && !isApprovedForAll) {
+                revert NotApproved();
+            }
+        } else {
+            if (quantity == 0) revert InvalidNFTParameters();
+            uint256 balance = IERC1155(nftContract).balanceOf(
+                msg.sender,
+                tokenId
+            );
+            if (balance < quantity) revert InsufficientBalance();
+            if (
+                !IERC1155(nftContract).isApprovedForAll(
+                    msg.sender,
+                    address(this)
+                )
+            ) {
+                revert NotApproved();
+            }
+        }
 
         listingCounter++;
         listingId = listingCounter;
 
-        // Create universal listing record
+        // Determine asset type
+        AssetTypes.AssetType assetType = standard ==
+            AssetTypes.TokenStandard.ERC721
+            ? AssetTypes.AssetType.NFT721
+            : AssetTypes.AssetType.NFT1155;
+
+        // Create listing
+        listings[listingId] = Listing({
+            listingId: listingId,
+            seller: msg.sender,
+            assetType: assetType,
+            price: price,
+            status: AssetTypes.ListingStatus.Active,
+            createdAt: block.timestamp,
+            assetHash: bytes32(0),
+            metadataURI: ""
+        });
+
+        // Store NFT details
+        nftDetails[listingId] = NFTDetails({
+            nftContract: nftContract,
+            tokenId: uint64(tokenId),
+            quantity: uint16(quantity),
+            standard: standard
+        });
+
+        sellerListings[msg.sender].push(listingId);
+
+        emit NFTListingCreated(
+            listingId,
+            msg.sender,
+            nftContract,
+            tokenId,
+            quantity,
+            price
+        );
+
+        return listingId;
+    }
+
+    /**
+     * @notice Create off-chain asset listing
+     * @param assetType Type of off-chain asset
+     * @param price Listing price
+     * @param assetHash Hash of asset details
+     * @param metadataURI IPFS link to metadata
+     * @return listingId Unique listing ID
+     */
+    function createOffChainListing(
+        AssetTypes.AssetType assetType,
+        uint256 price,
+        bytes32 assetHash,
+        string calldata metadataURI
+    ) external whenNotPaused nonReentrant returns (uint256 listingId) {
+        if (price == 0) revert InvalidPrice();
+        assetType.validateAssetType();
+        if (assetType.isNFTType()) revert Errors.UseCreateNFTListing();
+        if (assetHash == bytes32(0)) revert Errors.AssetHashRequired();
+        if (bytes(metadataURI).length == 0) revert Errors.MetadataURIRequired();
+
+        listingCounter++;
+        listingId = listingCounter;
+
         listings[listingId] = Listing({
             listingId: listingId,
             seller: msg.sender,
@@ -97,62 +243,55 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
 
         sellerListings[msg.sender].push(listingId);
 
-        // Route to appropriate handler
-        if (assetType.isNFTType()) {
-            // NFTs go to NFTMarketplace (handled separately, user calls NFTMarketplace directly)
-            listingHandler[listingId] = address(nftMarketplace);
-        } else {
-            // Off-chain assets require escrow
-            listingHandler[listingId] = address(escrowManager);
-        }
-
         emit ListingCreated(listingId, msg.sender, assetType, price);
 
         return listingId;
     }
 
     /**
-     * @notice Purchase an asset (routes to handler)
+     * @notice Purchase any asset (NFT or off-chain)
      * @param listingId Listing ID
+     * @dev Automatically routes to appropriate handler
      */
     function purchaseAsset(
         uint256 listingId
     ) external payable whenNotPaused nonReentrant {
         Listing storage listing = listings[listingId];
 
-        require(
-            listing.status == AssetTypes.ListingStatus.Active,
-            "Listing not active"
-        );
-        require(msg.value == listing.price, "Incorrect payment");
-        require(msg.sender != listing.seller, "Cannot buy own listing");
+        if (listing.status != AssetTypes.ListingStatus.Active) {
+            revert ListingNotActive();
+        }
+        if (msg.value != listing.price) revert IncorrectPayment();
+        if (msg.sender == listing.seller) revert CannotBuyOwnListing();
 
-        // Update status
+        // Mark as sold
         listing.status = AssetTypes.ListingStatus.Sold;
 
-        // Track purchase
-        buyerPurchases[msg.sender].push(listingId);
+        // Route to appropriate handler
+        if (listing.assetType.isNFTType()) {
+            // NFT - delegate to NFTMarketplace
+            NFTDetails memory nft = nftDetails[listingId];
 
-        // Route to handler
-        address handler = listingHandler[listingId];
-
-        if (handler == address(escrowManager)) {
-            // Create escrow for off-chain asset
+            nftMarketplace.executePurchase{value: msg.value}(
+                msg.sender,
+                listing.seller,
+                nft.nftContract,
+                nft.tokenId,
+                nft.quantity,
+                nft.standard
+            );
+        } else {
+            // Off-chain asset - create escrow
             uint256 duration = listing.assetType.recommendedEscrowDuration();
 
-            uint256 escrowId = escrowManager.createEscrow{value: msg.value}(
+            escrowManager.createEscrow{value: msg.value}(
+                msg.sender,
                 listing.seller,
                 listing.assetType,
                 duration,
                 listing.assetHash,
                 listing.metadataURI
             );
-
-            listingToHandlerId[listingId] = escrowId;
-        } else {
-            // NFT marketplace handles its own logic
-            // This path shouldn't be hit as NFT sales go directly to NFTMarketplace
-            revert("Use NFTMarketplace directly for NFTs");
         }
 
         emit ListingSold(listingId, msg.sender, listing.seller, listing.price);
@@ -165,15 +304,36 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     function cancelListing(uint256 listingId) external nonReentrant {
         Listing storage listing = listings[listingId];
 
-        require(listing.seller == msg.sender, "Not seller");
-        require(
-            listing.status == AssetTypes.ListingStatus.Active,
-            "Not active"
-        );
+        if (listing.seller != msg.sender) revert NotSeller();
+        if (listing.status != AssetTypes.ListingStatus.Active) {
+            revert ListingNotActive();
+        }
 
         listing.status = AssetTypes.ListingStatus.Cancelled;
 
         emit ListingCancelled(listingId, msg.sender);
+    }
+
+    /**
+     * @notice Update listing price
+     * @param listingId Listing ID
+     * @param newPrice New price
+     */
+    function updatePrice(uint256 listingId, uint256 newPrice) external {
+        Listing storage listing = listings[listingId];
+
+        if (listing.seller != msg.sender) revert NotSeller();
+        if (listing.status != AssetTypes.ListingStatus.Active) {
+            revert ListingNotActive();
+        }
+        if (newPrice == 0 || newPrice > AssetTypes.MAX_LISTING_PRICE) {
+            revert InvalidPrice();
+        }
+
+        uint256 oldPrice = listing.price;
+        listing.price = newPrice;
+
+        emit PriceUpdated(listingId, oldPrice, newPrice);
     }
 
     // ============================================
@@ -186,66 +346,20 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         return listings[listingId];
     }
 
+    function getNFTDetails(
+        uint256 listingId
+    ) external view returns (NFTDetails memory) {
+        return nftDetails[listingId];
+    }
+
     function getSellerListings(
         address seller
     ) external view returns (uint256[] memory) {
         return sellerListings[seller];
     }
 
-    function getBuyerPurchases(
-        address buyer
-    ) external view returns (uint256[] memory) {
-        return buyerPurchases[buyer];
-    }
-
-    function getListingHandler(
-        uint256 listingId
-    ) external view returns (address) {
-        return listingHandler[listingId];
-    }
-
-    function getHandlerListingId(
-        uint256 listingId
-    ) external view returns (uint256) {
-        return listingToHandlerId[listingId];
-    }
-
-    // ============================================
-    // STATISTICS
-    // ============================================
-
-    function getTotalListings() external view returns (uint256) {
-        return listingCounter;
-    }
-
-    function getSellerListingCount(
-        address seller
-    ) external view returns (uint256) {
-        return sellerListings[seller].length;
-    }
-
-    function getBuyerPurchaseCount(
-        address buyer
-    ) external view returns (uint256) {
-        return buyerPurchases[buyer].length;
-    }
-
-    /**
-     * @notice Get active listings count for a seller
-     */
-    function getSellerActiveListings(
-        address seller
-    ) external view returns (uint256 count) {
-        uint256[] memory sellerListing = sellerListings[seller];
-        for (uint256 i = 0; i < sellerListing.length; i++) {
-            if (
-                listings[sellerListing[i]].status ==
-                AssetTypes.ListingStatus.Active
-            ) {
-                count++;
-            }
-        }
-        return count;
+    function isNFTListing(uint256 listingId) external view returns (bool) {
+        return listings[listingId].assetType.isNFTType();
     }
 
     // ============================================
@@ -253,40 +367,16 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     // ============================================
 
     function pause() external {
-        require(
-            roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender),
-            "Not pauser"
-        );
+        if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
+            revert Errors.NotPauser(msg.sender);
+        }
         _pause();
     }
 
     function unpause() external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
         _unpause();
-    }
-
-    // ============================================
-    // HELPER FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Check if listing requires escrow
-     */
-    function requiresEscrow(uint256 listingId) external view returns (bool) {
-        AssetTypes.AssetType assetType = listings[listingId].assetType;
-        return assetType.requiresEscrow();
-    }
-
-    /**
-     * @notice Get recommended escrow duration for listing
-     */
-    function getRecommendedDuration(
-        uint256 listingId
-    ) external view returns (uint256) {
-        AssetTypes.AssetType assetType = listings[listingId].assetType;
-        return assetType.recommendedEscrowDuration();
     }
 }

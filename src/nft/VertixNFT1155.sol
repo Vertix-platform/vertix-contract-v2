@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Burnable.sol";
-import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply.sol";
-import "@openzeppelin/contracts/token/common/ERC2981.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155BurnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/common/ERC2981Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "../libraries/AssetTypes.sol";
+import "../libraries/Errors.sol";
 
 /**
  * @title VertixNFT1155
@@ -15,12 +17,13 @@ import "../libraries/AssetTypes.sol";
  * @dev Used for gaming items, limited editions, fractional ownership
  */
 contract VertixNFT1155 is
-    ERC1155,
-    ERC1155Burnable,
-    ERC1155Supply,
-    ERC2981,
-    Ownable,
-    Pausable
+    Initializable,
+    ERC1155Upgradeable,
+    ERC1155BurnableUpgradeable,
+    ERC1155SupplyUpgradeable,
+    ERC2981Upgradeable,
+    OwnableUpgradeable,
+    PausableUpgradeable
 {
     // ============================================
     // STATE VARIABLES
@@ -34,17 +37,38 @@ contract VertixNFT1155 is
     mapping(uint256 => uint256) public tokenMaxSupply;
 
     // ============================================
-    // CONSTRUCTOR
+    // CONSTRUCTOR & INITIALIZER
     // ============================================
 
-    constructor(
+    /**
+     * @notice Constructor for implementation contract (called once)
+     * @dev Disables initializers to prevent implementation from being initialized
+     */
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initialize NFT collection (called by factory after cloning)
+     * @dev Can only be called once per clone due to initializer modifier
+     */
+    function initialize(
         string memory name_,
         string memory symbol_,
         string memory uri_,
         address creator_,
         address royaltyReceiver_,
         uint96 royaltyFeeBps_
-    ) ERC1155(uri_) Ownable(creator_) {
+    ) external initializer {
+        // Initialize parent contracts
+        __ERC1155_init(uri_);
+        __ERC1155Burnable_init();
+        __ERC1155Supply_init();
+        __ERC2981_init();
+        __Ownable_init(creator_);
+        __Pausable_init();
+
+        // Set state variables
         name = name_;
         symbol = symbol_;
 
@@ -79,14 +103,15 @@ contract VertixNFT1155 is
         uint256 tokenId,
         uint256 amount
     ) external onlyOwner whenNotPaused {
-        require(tokenId < _tokenIdCounter, "Token doesn't exist");
+        if (tokenId >= _tokenIdCounter)
+            revert Errors.TokenDoesNotExist(tokenId);
 
         uint256 maxSupply_ = tokenMaxSupply[tokenId];
         if (maxSupply_ > 0) {
-            require(
-                totalSupply(tokenId) + amount <= maxSupply_,
-                "Max supply reached"
-            );
+            uint256 currentSupply = totalSupply(tokenId);
+            if (currentSupply + amount > maxSupply_) {
+                revert Errors.MaxSupplyReached(currentSupply, maxSupply_);
+            }
         }
 
         _mint(to, tokenId, amount, "");
@@ -120,7 +145,9 @@ contract VertixNFT1155 is
         address receiver,
         uint96 feeBps
     ) external onlyOwner {
-        require(feeBps <= AssetTypes.MAX_ROYALTY_BPS, "Royalty too high");
+        if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
+            revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
+        }
         _setDefaultRoyalty(receiver, feeBps);
     }
 
@@ -129,7 +156,9 @@ contract VertixNFT1155 is
         address receiver,
         uint96 feeBps
     ) external onlyOwner {
-        require(feeBps <= AssetTypes.MAX_ROYALTY_BPS, "Royalty too high");
+        if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
+            revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
+        }
         _setTokenRoyalty(tokenId, receiver, feeBps);
     }
 
@@ -154,13 +183,22 @@ contract VertixNFT1155 is
         address to,
         uint256[] memory ids,
         uint256[] memory values
-    ) internal override(ERC1155, ERC1155Supply) whenNotPaused {
+    )
+        internal
+        override(ERC1155Upgradeable, ERC1155SupplyUpgradeable)
+        whenNotPaused
+    {
         super._update(from, to, ids, values);
     }
 
     function supportsInterface(
         bytes4 interfaceId
-    ) public view override(ERC1155, ERC2981) returns (bool) {
+    )
+        public
+        view
+        override(ERC1155Upgradeable, ERC2981Upgradeable)
+        returns (bool)
+    {
         return super.supportsInterface(interfaceId);
     }
 }

@@ -36,18 +36,14 @@ interface IReputationManager {
         VerifiedAsset, // +20 points
         FraudDetected, // -100 points (permanent)
         InactivityDecay // -1 point per 30 days
+
     }
 
     // ============================================
     //                EVENTS
     // ============================================
 
-    event ReputationUpdated(
-        address indexed user,
-        ReputationAction action,
-        int256 pointsChange,
-        int256 newScore
-    );
+    event ReputationUpdated(address indexed user, ReputationAction action, int256 pointsChange, int256 newScore);
 
     event UserBanned(address indexed user, string reason, address bannedBy);
 
@@ -67,9 +63,7 @@ interface IReputationManager {
 
     function updateReputation(address user, ReputationAction action) external;
 
-    function getReputation(
-        address user
-    ) external view returns (Reputation memory);
+    function getReputation(address user) external view returns (Reputation memory);
 
     function getReputationScore(address user) external view returns (int256);
 

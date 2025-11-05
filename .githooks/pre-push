@@ -1,0 +1,175 @@
+#!/bin/bash
+
+# Pre-push hook for Solidity projects
+# Prevents pushing if validation checks fail
+
+set -e
+
+BOLD="\033[1m"
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+BLUE="\033[0;34m"
+RESET="\033[0m"
+
+echo ""
+echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${BOLD}${BLUE}  🔒 Pre-Push Validation${RESET}"
+echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+
+# Load configuration if exists
+CONFIG_FILE=".forge-hooks.json"
+SKIP_TESTS=false
+SKIP_COVERAGE=false
+SKIP_GAS_SNAPSHOT=false
+MIN_COVERAGE=80
+
+if [ -f "$CONFIG_FILE" ]; then
+    SKIP_TESTS=$(cat "$CONFIG_FILE" | grep -o '"skipTests":[^,}]*' | cut -d':' -f2 | tr -d ' ' || echo "false")
+    SKIP_COVERAGE=$(cat "$CONFIG_FILE" | grep -o '"skipCoverage":[^,}]*' | cut -d':' -f2 | tr -d ' ' || echo "false")
+    SKIP_GAS_SNAPSHOT=$(cat "$CONFIG_FILE" | grep -o '"skipGasSnapshot":[^,}]*' | cut -d':' -f2 | tr -d ' ' || echo "false")
+    MIN_COVERAGE=$(cat "$CONFIG_FILE" | grep -o '"minCoverage":[^,}]*' | cut -d':' -f2 | tr -d ' ' || echo "80")
+fi
+
+# Check if we should skip hooks
+if [ -n "$SKIP_HOOKS" ] || [ -n "$NO_VERIFY" ]; then
+    echo -e "${YELLOW}⚠️  Skipping pre-push hooks (SKIP_HOOKS or NO_VERIFY set)${RESET}"
+    exit 0
+fi
+
+# Track overall status
+FAILED=0
+
+# Function to print step header
+print_step() {
+    echo ""
+    echo -e "${BOLD}${BLUE}▶ $1${RESET}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Function to print success
+print_success() {
+    echo -e "${GREEN}✓ $1${RESET}"
+}
+
+# Function to print error
+print_error() {
+    echo -e "${RED}✗ $1${RESET}"
+}
+
+# Function to print warning
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${RESET}"
+}
+
+# 1. Format Check
+print_step "Step 1: Checking code formatting"
+if forge fmt --check > /dev/null 2>&1; then
+    print_success "Code formatting is correct"
+else
+    print_error "Code formatting check failed"
+    echo ""
+    echo -e "${YELLOW}Run 'forge fmt' to fix formatting issues${RESET}"
+    FAILED=1
+fi
+
+# 2. Build Check
+print_step "Step 2: Building contracts"
+if forge build --sizes > /dev/null 2>&1; then
+    print_success "Build successful"
+else
+    print_error "Build failed"
+    echo ""
+    echo -e "${YELLOW}Run 'forge build' to see detailed errors${RESET}"
+    FAILED=1
+fi
+
+# 3. Run Tests
+if [ "$SKIP_TESTS" != "true" ]; then
+    print_step "Step 3: Running tests"
+    if forge test > /dev/null 2>&1; then
+        print_success "All tests passed"
+    else
+        print_error "Tests failed"
+        echo ""
+        echo -e "${YELLOW}Run 'forge test -vvv' to see detailed test results${RESET}"
+        FAILED=1
+    fi
+else
+    print_warning "Skipping tests (configured in .forge-hooks.json)"
+fi
+
+# 4. Coverage Check
+if [ "$SKIP_COVERAGE" != "true" ] && [ "$FAILED" -eq 0 ]; then
+    print_step "Step 4: Checking test coverage"
+
+    # Generate coverage report
+    if forge coverage --report summary > /tmp/coverage-report.txt 2>&1; then
+        # Extract overall coverage percentage
+        COVERAGE=$(grep -oP '\d+\.\d+(?=% overall coverage)' /tmp/coverage-report.txt || echo "0")
+
+        if [ -n "$COVERAGE" ]; then
+            COVERAGE_INT=${COVERAGE%.*}
+            if [ "$COVERAGE_INT" -ge "$MIN_COVERAGE" ]; then
+                print_success "Coverage: ${COVERAGE}% (minimum: ${MIN_COVERAGE}%)"
+            else
+                print_error "Coverage too low: ${COVERAGE}% (minimum: ${MIN_COVERAGE}%)"
+                echo ""
+                echo -e "${YELLOW}Run 'forge coverage' to see detailed coverage report${RESET}"
+                FAILED=1
+            fi
+        else
+            print_warning "Could not determine coverage percentage"
+        fi
+    else
+        print_warning "Coverage check failed (this is not blocking)"
+    fi
+elif [ "$SKIP_COVERAGE" = "true" ]; then
+    print_warning "Skipping coverage check (configured in .forge-hooks.json)"
+fi
+
+# 5. Gas Snapshot (optional)
+if [ "$SKIP_GAS_SNAPSHOT" != "true" ] && [ "$FAILED" -eq 0 ]; then
+    print_step "Step 5: Checking gas usage"
+
+    if [ -f ".gas-snapshot" ]; then
+        # Create temporary snapshot
+        forge snapshot --snap /tmp/.gas-snapshot-temp > /dev/null 2>&1
+
+        # Compare with existing snapshot
+        if diff -q .gas-snapshot /tmp/.gas-snapshot-temp > /dev/null 2>&1; then
+            print_success "Gas usage unchanged"
+        else
+            print_warning "Gas usage has changed"
+            echo ""
+            echo -e "${YELLOW}Review changes with: diff .gas-snapshot /tmp/.gas-snapshot-temp${RESET}"
+            echo -e "${YELLOW}Update snapshot with: forge snapshot${RESET}"
+        fi
+
+        rm -f /tmp/.gas-snapshot-temp
+    else
+        print_warning "No gas snapshot found (run 'forge snapshot' to create one)"
+    fi
+elif [ "$SKIP_GAS_SNAPSHOT" = "true" ]; then
+    print_warning "Skipping gas snapshot (configured in .forge-hooks.json)"
+fi
+
+# Final Result
+echo ""
+echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+if [ $FAILED -eq 1 ]; then
+    echo -e "${BOLD}${RED}✗ Pre-push validation FAILED${RESET}"
+    echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    echo -e "${YELLOW}To skip these checks temporarily, use:${RESET}"
+    echo -e "${YELLOW}  git push --no-verify${RESET}"
+    echo ""
+    exit 1
+else
+    echo -e "${BOLD}${GREEN}✓ All validation checks passed!${RESET}"
+    echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    exit 0
+fi

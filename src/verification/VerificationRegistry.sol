@@ -4,6 +4,7 @@ pragma solidity 0.8.20;
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IVerificationRegistry.sol";
 import "../libraries/AssetTypes.sol";
+import "../libraries/Errors.sol";
 import "../access/RoleManager.sol";
 
 /**
@@ -53,6 +54,9 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     mapping(address => mapping(AssetTypes.AssetType => uint256))
         public ownerAssetVerification;
 
+    /// @notice Verification ID => owner address (reverse mapping for efficient lookups)
+    mapping(uint256 => address) public verificationOwner;
+
     /// @notice Whitelisted verifier addresses
     mapping(address => bool) public whitelistedVerifiers;
 
@@ -68,7 +72,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @param _roleManager Address of role manager contract
      */
     constructor(address _roleManager) {
-        require(_roleManager != address(0), "Invalid role manager");
+        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         roleManager = RoleManager(_roleManager);
     }
 
@@ -130,6 +134,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         // Track ownership
         ownerVerifications[owner].push(verificationId);
         ownerAssetVerification[owner][assetType] = verificationId;
+        verificationOwner[verificationId] = owner;
 
         emit VerificationAdded(
             verificationId,
@@ -164,7 +169,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
             msg.sender
         );
 
-        require(isVerifier || isAdmin, "Not authorized to revoke");
+        if (!isVerifier && !isAdmin) revert Errors.NotAuthorized(msg.sender);
 
         // Check if active
         if (!verification.isActive) {
@@ -174,10 +179,11 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         // Revoke
         verification.isActive = false;
 
-        // Find owner and clear mapping
+        // Find owner and clear mappings
         address owner = _findOwner(verificationId);
         if (owner != address(0)) {
             delete ownerAssetVerification[owner][verification.assetType];
+            delete verificationOwner[verificationId];
         }
 
         emit VerificationRevoked(verificationId, owner, msg.sender, reason);
@@ -224,12 +230,18 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
             verificationMetadata[verificationId] = newMetadataURI;
         }
 
-        // Reactivate if was inactive
+        // Reactivate if was inactive and restore mappings
+        address owner = _findOwner(verificationId);
         if (!verification.isActive) {
             verification.isActive = true;
+            // Restore mappings if they were cleared during revocation
+            if (owner != address(0)) {
+                ownerAssetVerification[owner][
+                    verification.assetType
+                ] = verificationId;
+                verificationOwner[verificationId] = owner;
+            }
         }
-
-        address owner = _findOwner(verificationId);
 
         emit VerificationRenewed(
             verificationId,
@@ -248,12 +260,11 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @param verifier Address to whitelist
      */
     function addVerifier(address verifier) external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
 
-        require(verifier != address(0), "Invalid verifier");
+        if (verifier == address(0)) revert Errors.InvalidVerifier();
 
         if (whitelistedVerifiers[verifier]) {
             revert VerifierAlreadyWhitelisted(verifier);
@@ -269,10 +280,9 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @param verifier Address to remove
      */
     function removeVerifier(address verifier) external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
 
         if (!whitelistedVerifiers[verifier]) {
             revert VerifierNotWhitelisted(verifier);
@@ -344,40 +354,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         return block.timestamp > verifications[verificationId].expiresAt;
     }
 
-    /**
-     * @notice Get time until expiration
-     */
-    function timeUntilExpiration(
-        uint256 verificationId
-    ) external view returns (uint256) {
-        _validateVerificationExists(verificationId);
-
-        uint256 expiresAt = verifications[verificationId].expiresAt;
-
-        if (block.timestamp >= expiresAt) return 0;
-
-        return expiresAt - block.timestamp;
-    }
-
-    /**
-     * @notice Check if address is whitelisted verifier
-     */
-    function isWhitelistedVerifier(
-        address verifier
-    ) external view returns (bool) {
-        return whitelistedVerifiers[verifier];
-    }
-
-    /**
-     * @notice Get metadata URI for verification
-     */
-    function getVerificationMetadata(
-        uint256 verificationId
-    ) external view returns (string memory) {
-        _validateVerificationExists(verificationId);
-        return verificationMetadata[verificationId];
-    }
-
     // ============================================
     // INTERNAL HELPERS
     // ============================================
@@ -390,14 +366,11 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
 
     /**
      * @notice Find owner of a verification
-     * @dev Iterates through owner mappings (expensive, cache result)
+     * @dev Uses reverse mapping for efficient O(1) lookup
      */
     function _findOwner(
         uint256 verificationId
     ) internal view returns (address) {
-        // This is inefficient but only used in rare cases (revocation)
-        // In production, consider maintaining reverse mapping
-        // For now, caller should provide owner address to avoid this
-        return address(0); // Placeholder - would need reverse mapping
+        return verificationOwner[verificationId];
     }
 }

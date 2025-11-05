@@ -5,225 +5,81 @@ import {AssetTypes} from "../libraries/AssetTypes.sol";
 
 /**
  * @title INFTMarketplace
- * @notice Interface for NFT marketplace with atomic swaps
- * @dev Handles instant NFT trading without escrow (trustless via smart contract)
+ * @notice Interface for stateless NFT executor
+ * @dev Called only by MarketplaceCore to execute NFT transfers + payment distribution
  */
 interface INFTMarketplace {
-    // ============================================
-    //                STRUCTS
-    // ============================================
-
-    /**
-     * @notice NFT listing data structure
-     * @dev Optimized for storage packing (2 slots)
-     */
-    struct Listing {
-        address seller;
-        uint96 price;
-        address nftContract;
-        uint64 tokenId;
-        uint16 quantity;
-        AssetTypes.TokenStandard standard;
-        bool active;
-    }
-
     // ============================================
     //               EVENTS
     // ============================================
 
-    /**
-     * @notice Emitted when a new NFT listing is created
-     * @param listingId Unique listing identifier
-     * @param seller Seller address
-     * @param nftContract NFT contract address
-     * @param tokenId Token ID being listed
-     * @param quantity Quantity (1 for ERC721, multiple for ERC1155)
-     * @param price Listing price
-     * @param standard Token standard (ERC721 or ERC1155)
-     */
-    event ListingCreated(
-        uint256 indexed listingId,
-        address indexed seller,
+    event NFTTransferred(
         address indexed nftContract,
-        uint256 tokenId,
-        uint256 quantity,
-        uint256 price,
-        AssetTypes.TokenStandard standard
+        uint256 indexed tokenId,
+        address indexed from,
+        address to,
+        uint256 quantity
     );
 
-    /**
-     * @notice Emitted when an NFT is sold
-     * @param listingId Listing identifier
-     * @param buyer Buyer address
-     * @param seller Seller address
-     * @param nftContract NFT contract
-     * @param tokenId Token ID
-     * @param quantity Quantity sold
-     * @param price Sale price
-     * @param platformFee Fee collected by platform
-     * @param royaltyFee Royalty paid to creator
-     * @param sellerNet Net amount to seller
-     */
-    event NFTSold(
-        uint256 indexed listingId,
-        address indexed buyer,
+    event PaymentDistributed(
         address indexed seller,
-        address nftContract,
-        uint256 tokenId,
-        uint256 quantity,
-        uint256 price,
+        uint256 sellerNet,
         uint256 platformFee,
-        uint256 royaltyFee,
-        uint256 sellerNet
-    );
-
-    /**
-     * @notice Emitted when a listing is cancelled
-     * @param listingId Listing identifier
-     * @param seller Seller who cancelled
-     * @param nftContract NFT contract
-     * @param tokenId Token ID
-     */
-    event ListingCancelled(
-        uint256 indexed listingId,
-        address indexed seller,
-        address nftContract,
-        uint256 tokenId
-    );
-
-    /**
-     * @notice Emitted when listing price is updated
-     * @param listingId Listing identifier
-     * @param oldPrice Previous price
-     * @param newPrice New price
-     */
-    event ListingPriceUpdated(
-        uint256 indexed listingId,
-        uint256 oldPrice,
-        uint256 newPrice
+        address royaltyReceiver,
+        uint256 royaltyAmount
     );
 
     // ============================================
     //                ERRORS
     // ============================================
 
-    error InvalidListingId(uint256 listingId);
-    error ListingNotActive(uint256 listingId);
-    error UnauthorizedSeller(address caller, address seller);
-    error InvalidPrice(uint256 price);
-    error InvalidQuantity(uint256 quantity);
-    error NFTNotOwned(
-        address nftContract,
-        uint256 tokenId,
-        address expectedOwner
-    );
-    error NFTNotApproved(address nftContract, address marketplace);
-    error InsufficientBalance(
-        address nftContract,
-        uint256 tokenId,
-        uint256 required,
-        uint256 actual
-    );
-    error IncorrectPayment(uint256 provided, uint256 required);
-    error CannotBuyOwnNFT();
+    error OnlyMarketplaceCore();
     error TransferFailed(address recipient, uint256 amount);
-    error InvalidTokenStandard();
+    error InvalidNFTContract();
+    error InsufficientOwnership();
+    error NotApproved();
 
     // ============================================
-    //              CORE FUNCTIONS
+    //          EXECUTION FUNCTION
     // ============================================
 
     /**
-     * @notice Create a new NFT listing
-     * @param nftContract Address of the NFT contract
-     * @param tokenId Token ID to list
-     * @param quantity Quantity to list (1 for ERC721, multiple for ERC1155)
-     * @param price Listing price
+     * @notice Execute NFT purchase (only callable by MarketplaceCore)
+     * @param buyer Address receiving the NFT
+     * @param seller Address selling the NFT
+     * @param nftContract NFT contract address
+     * @param tokenId Token ID
+     * @param quantity Quantity (1 for ERC721, >1 for ERC1155)
      * @param standard Token standard (ERC721 or ERC1155)
-     * @return listingId Unique identifier for the listing
-     * @dev Seller must approve marketplace before listing
+     * @dev Payment sent as msg.value
      */
-    function createListing(
+    function executePurchase(
+        address buyer,
+        address seller,
         address nftContract,
         uint256 tokenId,
         uint256 quantity,
-        uint256 price,
         AssetTypes.TokenStandard standard
-    ) external returns (uint256 listingId);
-
-    /**
-     * @notice Buy an NFT (atomic swap)
-     * @param listingId Listing identifier
-     * @dev Transfers NFT to buyer and distributes payment in single transaction
-     *      Payment distribution: Platform fee + Royalty (if ERC2981) + Seller net
-     */
-    function buyNFT(uint256 listingId) external payable;
-
-    /**
-     * @notice Cancel an NFT listing
-     * @param listingId Listing identifier
-     * @dev Only seller can cancel
-     */
-    function cancelListing(uint256 listingId) external;
-
-    /**
-     * @notice Update listing price
-     * @param listingId Listing identifier
-     * @param newPrice New price
-     * @dev Only seller can update, listing must be active
-     */
-    function updateListingPrice(uint256 listingId, uint256 newPrice) external;
+    ) external payable;
 
     // ============================================
     //             VIEW FUNCTIONS
     // ============================================
 
     /**
-     * @notice Get listing details
-     * @param listingId Listing identifier
-     * @return Listing struct
-     */
-    function getListing(
-        uint256 listingId
-    ) external view returns (Listing memory);
-
-    /**
-     * @notice Check if listing is active
-     * @param listingId Listing identifier
-     * @return True if active
-     */
-    function isListingActive(uint256 listingId) external view returns (bool);
-
-    /**
-     * @notice Get all active listings for a seller
-     * @param seller Seller address
-     * @return Array of listing IDs
-     */
-    function getSellerListings(
-        address seller
-    ) external view returns (uint256[] memory);
-
-    /**
-     * @notice Get listing ID for a specific NFT (if listed)
+     * @notice Calculate payment distribution for an NFT sale
      * @param nftContract NFT contract address
      * @param tokenId Token ID
-     * @return listingId (0 if not listed)
-     */
-    function getListingByNFT(
-        address nftContract,
-        uint256 tokenId
-    ) external view returns (uint256);
-
-    /**
-     * @notice Calculate payment distribution for a listing
-     * @param listingId Listing identifier
+     * @param salePrice Total sale price
      * @return platformFee Platform fee amount
-     * @return royaltyFee Royalty fee amount (if applicable)
+     * @return royaltyFee Royalty amount
      * @return sellerNet Net amount to seller
-     * @return royaltyReceiver Royalty recipient (if applicable)
+     * @return royaltyReceiver Address receiving royalty
      */
     function calculatePaymentDistribution(
-        uint256 listingId
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
     )
         external
         view
@@ -234,15 +90,6 @@ interface INFTMarketplace {
             address royaltyReceiver
         );
 
-    /**
-     * @notice Get total number of listings created
-     * @return Listing counter
-     */
-    function listingCounter() external view returns (uint256);
-
-    /**
-     * @notice Get platform fee in basis points
-     * @return Fee BPS (250 = 2.5%)
-     */
+    function marketplaceCore() external view returns (address);
     function platformFeeBps() external view returns (uint256);
 }

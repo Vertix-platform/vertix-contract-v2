@@ -70,29 +70,18 @@ contract RoleManager is AccessControl, Pausable {
      * @notice Emitted when a role grant is scheduled
      */
     event RoleGrantScheduled(
-        bytes32 indexed role,
-        address indexed account,
-        address indexed scheduler,
-        uint256 executeAfter
+        bytes32 indexed role, address indexed account, address indexed scheduler, uint256 executeAfter
     );
 
     /**
      * @notice Emitted when a scheduled role grant is executed
      */
-    event RoleGrantExecuted(
-        bytes32 indexed role,
-        address indexed account,
-        address indexed executor
-    );
+    event RoleGrantExecuted(bytes32 indexed role, address indexed account, address indexed executor);
 
     /**
      * @notice Emitted when a scheduled role grant is cancelled
      */
-    event RoleGrantCancelled(
-        bytes32 indexed role,
-        address indexed account,
-        address indexed canceller
-    );
+    event RoleGrantCancelled(bytes32 indexed role, address indexed account, address indexed canceller);
 
     /**
      * @notice Emitted when contract is paused
@@ -144,20 +133,17 @@ contract RoleManager is AccessControl, Pausable {
      * @dev Requires DEFAULT_ADMIN_ROLE
      * @dev Timelock only applies to ADMIN_ROLE and DEFAULT_ADMIN_ROLE
      */
-    function scheduleRoleGrant(
-        bytes32 role,
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function scheduleRoleGrant(bytes32 role, address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (account == address(0)) {
             revert InvalidAddress(account);
         }
+
         if (hasRole(role, account)) {
             revert AlreadyHasRole(role, account);
         }
 
         // Only sensitive roles require timelock
-        bool requiresTimelock = (role == DEFAULT_ADMIN_ROLE ||
-            role == ADMIN_ROLE);
+        bool requiresTimelock = (role == DEFAULT_ADMIN_ROLE || role == ADMIN_ROLE);
 
         if (requiresTimelock) {
             uint256 executeAfter = block.timestamp + ROLE_CHANGE_TIMELOCK;
@@ -168,7 +154,7 @@ contract RoleManager is AccessControl, Pausable {
             // Non-sensitive roles can be granted immediately
             _grantRoleInternal(role, account);
 
-            emit RoleGrantExecuted(role, account, msg.sender)
+            emit RoleGrantExecuted(role, account, msg.sender);
         }
     }
 
@@ -177,10 +163,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param role Role identifier
      * @param account Address to receive role
      */
-    function executeRoleGrant(
-        bytes32 role,
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function executeRoleGrant(bytes32 role, address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         uint256 executeAfter = pendingRoleGrants[role][account];
 
         if (executeAfter == 0) {
@@ -205,10 +188,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param role Role identifier
      * @param account Address
      */
-    function cancelRoleGrant(
-        bytes32 role,
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function cancelRoleGrant(bytes32 role, address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (pendingRoleGrants[role][account] == 0) {
             revert NoScheduledGrant(role, account);
         }
@@ -235,10 +215,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param account Address to revoke from
      * @dev Prevents revoking last admin to avoid lockout
      */
-    function revokeRoleWithCheck(
-        bytes32 role,
-        address account
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revokeRoleWithCheck(bytes32 role, address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
         // Prevent removing last admin
         if (role == DEFAULT_ADMIN_ROLE) {
             uint256 adminCount = getRoleMemberCount(DEFAULT_ADMIN_ROLE);
@@ -297,9 +274,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param role Role identifier
      * @return Array of addresses
      */
-    function getRoleMembers(
-        bytes32 role
-    ) external view returns (address[] memory) {
+    function getRoleMembers(bytes32 role) external view returns (address[] memory) {
         return roleMembers[role];
     }
 
@@ -318,10 +293,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param account Address
      * @return executeAfter Timestamp when grant can be executed (0 if not pending)
      */
-    function getPendingRoleGrant(
-        bytes32 role,
-        address account
-    ) external view returns (uint256 executeAfter) {
+    function getPendingRoleGrant(bytes32 role, address account) external view returns (uint256 executeAfter) {
         return pendingRoleGrants[role][account];
     }
 
@@ -331,10 +303,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param account Address
      * @return True if timelock expired and can be executed
      */
-    function canExecuteRoleGrant(
-        bytes32 role,
-        address account
-    ) external view returns (bool) {
+    function canExecuteRoleGrant(bytes32 role, address account) external view returns (bool) {
         uint256 executeAfter = pendingRoleGrants[role][account];
         return executeAfter > 0 && block.timestamp >= executeAfter;
     }
@@ -345,9 +314,7 @@ contract RoleManager is AccessControl, Pausable {
      * @return True if has DEFAULT_ADMIN_ROLE or ADMIN_ROLE
      */
     function isAdmin(address account) external view returns (bool) {
-        return
-            hasRole(DEFAULT_ADMIN_ROLE, account) ||
-            hasRole(ADMIN_ROLE, account);
+        return hasRole(DEFAULT_ADMIN_ROLE, account) || hasRole(ADMIN_ROLE, account);
     }
 
     /**
@@ -359,7 +326,7 @@ contract RoleManager is AccessControl, Pausable {
     }
 
     // ============================================
-    // UTILITY FUNCTIONS
+    //          UTILITY FUNCTIONS
     // ============================================
 
     /**
@@ -368,12 +335,12 @@ contract RoleManager is AccessControl, Pausable {
      * @param accounts Array of addresses (must match roles length)
      * @dev For initial setup, skips timelock
      */
-    function batchGrantRoles(
-        bytes32[] calldata roles,
-        address[] calldata accounts
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if(roles.length != accounts.length){
-            revert LengthMismatch(roles.length, accounts.length)
+    function batchGrantRoles(bytes32[] calldata roles, address[] calldata accounts)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (roles.length != accounts.length) {
+            revert LengthMismatch(roles.length, accounts.length);
         }
 
         for (uint256 i = 0; i < roles.length; i++) {
@@ -389,10 +356,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param rolesToCheck Array of roles to check
      * @return hasAllRoles True if account has all specified roles
      */
-    function hasAllRoles(
-        address account,
-        bytes32[] calldata rolesToCheck
-    ) external view returns (bool) {
+    function hasAllRoles(address account, bytes32[] calldata rolesToCheck) external view returns (bool) {
         for (uint256 i = 0; i < rolesToCheck.length; i++) {
             if (!hasRole(rolesToCheck[i], account)) {
                 return false;
@@ -407,10 +371,7 @@ contract RoleManager is AccessControl, Pausable {
      * @param rolesToCheck Array of roles to check
      * @return hasAnyRole True if account has at least one role
      */
-    function hasAnyRole(
-        address account,
-        bytes32[] calldata rolesToCheck
-    ) external view returns (bool) {
+    function hasAnyRole(address account, bytes32[] calldata rolesToCheck) external view returns (bool) {
         for (uint256 i = 0; i < rolesToCheck.length; i++) {
             if (hasRole(rolesToCheck[i], account)) {
                 return true;

@@ -7,6 +7,7 @@ import "../interfaces/IEscrowManager.sol";
 import "../libraries/AssetTypes.sol";
 import "../libraries/PercentageMath.sol";
 import "../libraries/EscrowLogic.sol";
+import "../libraries/Errors.sol";
 import "../access/RoleManager.sol";
 import "../core/FeeDistributor.sol";
 
@@ -78,8 +79,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         address _feeDistributor,
         uint256 _platformFeeBps
     ) {
-        require(_roleManager != address(0), "Invalid role manager");
-        require(_feeDistributor != address(0), "Invalid fee distributor");
+        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
+        if (_feeDistributor == address(0))
+            revert Errors.InvalidFeeDistributor();
 
         PercentageMath.validateBps(_platformFeeBps, AssetTypes.MAX_FEE_BPS);
 
@@ -94,6 +96,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
 
     /**
      * @notice Create a new escrow for digital asset purchase
+     * @param buyer Address of the asset buyer (explicitly passed for marketplace integrations)
      * @param seller Address of the asset seller
      * @param assetType Type of asset being sold
      * @param duration Escrow duration in seconds
@@ -102,6 +105,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
      * @return escrowId Unique identifier for the escrow
      */
     function createEscrow(
+        address buyer,
         address seller,
         AssetTypes.AssetType assetType,
         uint256 duration,
@@ -109,24 +113,19 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         string calldata metadataURI
     ) external payable whenNotPaused nonReentrant returns (uint256 escrowId) {
         // Validate inputs
-        EscrowLogic.validateEscrowParams(
-            msg.sender,
-            seller,
-            msg.value,
-            duration
-        );
+        EscrowLogic.validateEscrowParams(buyer, seller, msg.value, duration);
         EscrowLogic.validateHash(assetHash);
         EscrowLogic.validateMetadataURI(metadataURI);
         assetType.validateAssetType();
 
         // Ensure asset type requires escrow
-        require(assetType.requiresEscrow(), "Asset type doesn't need escrow");
+        if (!assetType.requiresEscrow())
+            revert Errors.AssetTypeDoesNotRequireEscrow();
 
         // Validate amount is reasonable for asset type
-        require(
-            EscrowLogic.isReasonableAmount(msg.value, assetType),
-            "Amount seems unreasonable"
-        );
+        if (!EscrowLogic.isReasonableAmount(msg.value, assetType)) {
+            revert Errors.InsufficientPayment(msg.value, 0);
+        }
 
         // Increment counter
         escrowCounter++;
@@ -141,7 +140,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
 
         // Create escrow (storage optimized)
         escrows[escrowId] = Escrow({
-            buyer: msg.sender,
+            buyer: buyer,
             amount: uint96(msg.value),
             seller: seller,
             paymentToken: address(0), // Native token (ETH/MATIC)
@@ -160,7 +159,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         escrowMetadata[escrowId] = metadataURI;
 
         // Track escrows by user
-        buyerEscrows[msg.sender].push(escrowId);
+        buyerEscrows[buyer].push(escrowId);
         sellerEscrows[seller].push(escrowId);
 
         emit EscrowCreated(
@@ -259,11 +258,12 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         _validateEscrowExists(escrowId);
 
         // Must be in Active or Delivered state
-        require(
-            escrow.state == AssetTypes.EscrowState.Active ||
-                escrow.state == AssetTypes.EscrowState.Delivered,
-            "Invalid state for release"
-        );
+        if (
+            escrow.state != AssetTypes.EscrowState.Active &&
+            escrow.state != AssetTypes.EscrowState.Delivered
+        ) {
+            revert EscrowNotActive(escrowId, escrow.state);
+        }
 
         // Check not in dispute
         if (escrow.state == AssetTypes.EscrowState.Disputed) {
@@ -301,13 +301,13 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
 
         // Transfer to seller
         (bool success, ) = escrow.seller.call{value: sellerNet}("");
-        require(success, "Seller transfer failed");
+        if (!success) revert Errors.SellerTransferFailed();
 
         // Transfer platform fee to fee distributor (will accumulate there)
         (bool feeSuccess, ) = address(feeDistributor).call{value: platformFee}(
             ""
         );
-        require(feeSuccess, "Fee transfer failed");
+        if (!feeSuccess) revert Errors.FeeTransferFailed();
 
         emit EscrowReleased(
             escrowId,
@@ -333,23 +333,22 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         _validateEscrowExists(escrowId);
 
         // Must be buyer or seller
-        require(
-            msg.sender == escrow.buyer || msg.sender == escrow.seller,
-            "Not authorized to dispute"
-        );
+        if (msg.sender != escrow.buyer && msg.sender != escrow.seller) {
+            revert Errors.NotAuthorized(msg.sender);
+        }
 
         // Must be in active state (not completed/cancelled)
-        require(
-            escrow.state == AssetTypes.EscrowState.Active ||
-                escrow.state == AssetTypes.EscrowState.Delivered,
-            "Cannot dispute in current state"
-        );
+        if (
+            escrow.state != AssetTypes.EscrowState.Active &&
+            escrow.state != AssetTypes.EscrowState.Delivered
+        ) {
+            revert EscrowNotActive(escrowId, escrow.state);
+        }
 
         // Check dispute deadline
-        require(
-            block.timestamp <= escrow.disputeDeadline,
-            "Dispute deadline passed"
-        );
+        if (block.timestamp > escrow.disputeDeadline) {
+            revert DisputeDeadlinePassed(escrowId);
+        }
 
         // Update state
         EscrowLogic.validateStateTransition(
@@ -373,10 +372,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         uint256 amount
     ) external whenNotPaused nonReentrant {
         // Only arbitrator role can resolve
-        require(
-            roleManager.hasRole(roleManager.ARBITRATOR_ROLE(), msg.sender),
-            "Not arbitrator"
-        );
+        if (!roleManager.hasRole(roleManager.ARBITRATOR_ROLE(), msg.sender)) {
+            revert Errors.NotAuthorized(msg.sender);
+        }
 
         Escrow storage escrow = escrows[escrowId];
 
@@ -385,10 +383,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         _requireEscrowState(escrow, AssetTypes.EscrowState.Disputed);
 
         // Winner must be buyer or seller
-        require(
-            winner == escrow.buyer || winner == escrow.seller,
-            "Winner must be buyer or seller"
-        );
+        if (winner != escrow.buyer && winner != escrow.seller) {
+            revert Errors.NotAuthorized(winner);
+        }
 
         // Amount can't exceed escrow amount
         uint256 escrowAmount = uint256(escrow.amount);
@@ -405,7 +402,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
 
         // Transfer to winner
         (bool success, ) = winner.call{value: amount}("");
-        require(success, "Winner transfer failed");
+        if (!success) revert Errors.WinnerTransferFailed();
 
         // If partial resolution, transfer remainder to other party
         if (amount < escrowAmount) {
@@ -415,7 +412,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
             uint256 remainder = escrowAmount - amount;
 
             (bool successOther, ) = otherParty.call{value: remainder}("");
-            require(successOther, "Other party transfer failed");
+            if (!successOther) revert Errors.OtherPartyTransferFailed();
         }
 
         emit DisputeResolved(escrowId, winner, amount, msg.sender);
@@ -442,7 +439,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
             escrow.buyer
         );
 
-        require(canCancel, "Cannot cancel escrow");
+        if (!canCancel) revert Errors.CannotCancelEscrow();
 
         // Calculate refund amounts
         uint256 escrowAmount = uint256(escrow.amount);
@@ -457,12 +454,12 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
             (bool successSeller, ) = escrow.seller.call{
                 value: sellerCompensation
             }("");
-            require(successSeller, "Seller compensation failed");
+            if (!successSeller) revert Errors.SellerCompensationFailed();
         }
 
         // Refund buyer
         (bool successBuyer, ) = escrow.buyer.call{value: buyerRefund}("");
-        require(successBuyer, "Buyer refund failed");
+        if (!successBuyer) revert Errors.BuyerRefundFailed();
 
         emit EscrowCancelled(
             escrowId,
@@ -481,10 +478,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
      * @param newFeeBps New fee in basis points
      */
     function updatePlatformFee(uint256 newFeeBps) external {
-        require(
-            roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender),
-            "Not fee manager"
-        );
+        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
+            revert Errors.NotFeeManager(msg.sender);
+        }
 
         PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
 
@@ -498,10 +494,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
      * @notice Pause contract (PAUSER_ROLE only)
      */
     function pause() external {
-        require(
-            roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender),
-            "Not pauser"
-        );
+        if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
+            revert Errors.NotPauser(msg.sender);
+        }
         _pause();
     }
 
@@ -509,10 +504,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
      * @notice Unpause contract (ADMIN_ROLE only)
      */
     function unpause() external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
         _unpause();
     }
 
@@ -544,56 +538,6 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         address seller
     ) external view returns (uint256[] memory) {
         return sellerEscrows[seller];
-    }
-
-    /**
-     * @notice Check if escrow can be released
-     */
-    function canReleaseEscrow(uint256 escrowId) external view returns (bool) {
-        if (escrowId == 0 || escrowId > escrowCounter) return false;
-
-        Escrow memory escrow = escrows[escrowId];
-
-        if (
-            escrow.state != AssetTypes.EscrowState.Active &&
-            escrow.state != AssetTypes.EscrowState.Delivered
-        ) {
-            return false;
-        }
-
-        return
-            EscrowLogic.canRelease(
-                escrow.buyerConfirmed,
-                escrow.sellerDelivered,
-                escrow.releaseTime
-            );
-    }
-
-    /**
-     * @notice Check if escrow can be cancelled
-     */
-    function canCancelEscrow(
-        uint256 escrowId,
-        address caller
-    ) external view returns (bool) {
-        if (escrowId == 0 || escrowId > escrowCounter) return false;
-
-        Escrow memory escrow = escrows[escrowId];
-
-        if (escrow.state != AssetTypes.EscrowState.Active) return false;
-
-        return
-            EscrowLogic.canCancel(escrow.sellerDelivered, caller, escrow.buyer);
-    }
-
-    /**
-     * @notice Get escrow metadata URI
-     */
-    function getEscrowMetadata(
-        uint256 escrowId
-    ) external view returns (string memory) {
-        _validateEscrowExists(escrowId);
-        return escrowMetadata[escrowId];
     }
 
     // ============================================

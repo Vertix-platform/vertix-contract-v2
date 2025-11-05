@@ -1,297 +1,224 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import "@openzeppelin/contracts/token/common/ERC2981.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../interfaces/INFTMarketplace.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/PercentageMath.sol";
-import "../core/FeeDistributor.sol";
-import "../access/RoleManager.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {PercentageMath} from "../libraries/PercentageMath.sol";
+import {Errors} from "../libraries/Errors.sol";
+import {FeeDistributor} from "../core/FeeDistributor.sol";
 
 /**
  * @title NFTMarketplace
- * @notice Marketplace for instant NFT trading with atomic swaps
- * @dev No escrow needed - trustless via smart contract execution
+ * @notice Stateless NFT executor - handles only transfers and payments
+ * @dev Called by MarketplaceCore, doesn't store listings
  *
- * Flow:
- * 1. Seller approves marketplace contract
- * 2. Seller creates listing
- * 3. Buyer sends payment
- * 4. Single transaction: NFT transferred + payment distributed
- * 5. Platform fee + royalty deducted, seller receives net
+ * Design Philosophy:
+ * - NO state storage (listings tracked in MarketplaceCore)
+ * - Pure execution contract for NFT transfers + payment distribution
  */
-contract NFTMarketplace is INFTMarketplace, ReentrancyGuard, Pausable {
+contract NFTMarketplace is ReentrancyGuard {
     using PercentageMath for uint256;
 
     // ============================================
-    // STATE VARIABLES
+    //               ERRORS
     // ============================================
 
-    uint256 public listingCounter;
-    uint256 public platformFeeBps;
+    error OnlyMarketplaceCore();
+    error TransferFailed(address recipient, uint256 amount);
+    error InvalidNFTContract();
+    error InsufficientOwnership();
+    error NotApproved();
 
-    mapping(uint256 => Listing) public listings;
-    mapping(address => uint256[]) public sellerListings;
-    mapping(address => mapping(uint256 => uint256)) public nftToListing; // nftContract => tokenId => listingId
+    // ============================================
+    //          STATE VARIABLES
+    // ============================================
 
-    RoleManager public immutable roleManager;
+    /// @notice Address authorized to call this contract (MarketplaceCore)
+    address public immutable marketplaceCore;
+
+    /// @notice Fee distributor for platform fees
     FeeDistributor public immutable feeDistributor;
 
+    /// @notice Platform fee in basis points (immutable for gas savings)
+    uint256 public immutable platformFeeBps;
+
     // ============================================
-    // CONSTRUCTOR
+    // EVENTS
     // ============================================
 
+    event NFTTransferred(
+        address indexed nftContract,
+        uint256 indexed tokenId,
+        address indexed from,
+        address to,
+        uint256 quantity
+    );
+
+    event PaymentDistributed(
+        address indexed seller,
+        uint256 sellerNet,
+        uint256 platformFee,
+        address royaltyReceiver,
+        uint256 royaltyAmount
+    );
+
+    // ============================================
+    //               MODIFIERS
+    // ============================================
+
+    modifier onlyMarketplaceCore() {
+        if (msg.sender != marketplaceCore) revert OnlyMarketplaceCore();
+        _;
+    }
+
+    // ============================================
+    //              CONSTRUCTOR
+    // ============================================
+
+    /**
+     * @notice Initialize NFT marketplace executor
+     * @param _marketplaceCore Address of MarketplaceCore router
+     * @param _feeDistributor Address of fee distributor
+     * @param _platformFeeBps Platform fee in basis points
+     */
     constructor(
-        address _roleManager,
+        address _marketplaceCore,
         address _feeDistributor,
         uint256 _platformFeeBps
     ) {
-        require(_roleManager != address(0), "Invalid role manager");
-        require(_feeDistributor != address(0), "Invalid fee distributor");
-
+        if (_marketplaceCore == address(0))
+            revert Errors.InvalidMarketplaceCore();
+        if (_feeDistributor == address(0))
+            revert Errors.InvalidFeeDistributor();
         PercentageMath.validateBps(_platformFeeBps, AssetTypes.MAX_FEE_BPS);
 
-        roleManager = RoleManager(_roleManager);
+        marketplaceCore = _marketplaceCore;
         feeDistributor = FeeDistributor(payable(_feeDistributor));
         platformFeeBps = _platformFeeBps;
     }
 
     // ============================================
-    // LISTING FUNCTIONS
+    //          CORE EXECUTION FUNCTION
     // ============================================
 
-    function createListing(
+    /**
+     * @notice Execute NFT purchase (called by MarketplaceCore only)
+     * @param buyer Address receiving the NFT
+     * @param seller Address selling the NFT
+     * @param nftContract NFT contract address
+     * @param tokenId Token ID
+     * @param quantity Quantity (1 for ERC721, >1 for ERC1155)
+     * @param standard Token standard (ERC721 or ERC1155)
+     * @dev Payment must be sent as msg.value
+     */
+    function executePurchase(
+        address buyer,
+        address seller,
         address nftContract,
         uint256 tokenId,
         uint256 quantity,
-        uint256 price,
         AssetTypes.TokenStandard standard
-    ) external whenNotPaused nonReentrant returns (uint256 listingId) {
-        require(
-            price > 0 && price <= AssetTypes.MAX_LISTING_PRICE,
-            "Invalid price"
-        );
-        require(nftContract != address(0), "Invalid NFT contract");
+    ) external payable onlyMarketplaceCore nonReentrant {
+        if (nftContract == address(0)) revert InvalidNFTContract();
 
-        // Verify ownership and approval
-        if (standard == AssetTypes.TokenStandard.ERC721) {
-            require(quantity == 1, "ERC721 quantity must be 1");
-            require(
-                IERC721(nftContract).ownerOf(tokenId) == msg.sender,
-                "Not owner"
-            );
-            require(
-                IERC721(nftContract).getApproved(tokenId) == address(this) ||
-                    IERC721(nftContract).isApprovedForAll(
-                        msg.sender,
-                        address(this)
-                    ),
-                "Not approved"
-            );
-        } else {
-            require(quantity > 0, "Quantity must be > 0");
-            require(
-                IERC1155(nftContract).balanceOf(msg.sender, tokenId) >=
-                    quantity,
-                "Insufficient balance"
-            );
-            require(
-                IERC1155(nftContract).isApprovedForAll(
-                    msg.sender,
-                    address(this)
-                ),
-                "Not approved"
-            );
-        }
-
-        listingCounter++;
-        listingId = listingCounter;
-
-        listings[listingId] = Listing({
-            seller: msg.sender,
-            price: uint96(price),
-            nftContract: nftContract,
-            tokenId: uint64(tokenId),
-            quantity: uint16(quantity),
-            standard: standard,
-            active: true
-        });
-
-        sellerListings[msg.sender].push(listingId);
-        nftToListing[nftContract][tokenId] = listingId;
-
-        emit ListingCreated(
-            listingId,
-            msg.sender,
-            nftContract,
-            tokenId,
-            quantity,
-            price,
-            standard
-        );
-
-        return listingId;
-    }
-
-    function buyNFT(
-        uint256 listingId
-    ) external payable whenNotPaused nonReentrant {
-        Listing storage listing = listings[listingId];
-
-        require(listing.active, "Listing not active");
-        require(msg.value == listing.price, "Incorrect payment");
-        require(msg.sender != listing.seller, "Cannot buy own NFT");
-
-        listing.active = false;
-
-        uint256 price = uint256(listing.price);
-
-        // Calculate royalty
-        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(
-            listing.nftContract,
-            listing.tokenId,
-            price
-        );
+        uint256 price = msg.value;
 
         // Calculate fees
         uint256 platformFee = price.percentOf(platformFeeBps);
+        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(
+            nftContract,
+            tokenId,
+            price
+        );
         uint256 sellerNet = price - platformFee - royaltyAmount;
 
-        // Transfer NFT first (Checks-Effects-Interactions)
-        if (listing.standard == AssetTypes.TokenStandard.ERC721) {
-            IERC721(listing.nftContract).safeTransferFrom(
-                listing.seller,
-                msg.sender,
-                listing.tokenId
-            );
-        } else {
-            IERC1155(listing.nftContract).safeTransferFrom(
-                listing.seller,
-                msg.sender,
-                listing.tokenId,
-                listing.quantity,
-                ""
-            );
-        }
+        // Transfer NFT (Checks-Effects-Interactions)
+        _transferNFT(nftContract, seller, buyer, tokenId, quantity, standard);
 
-        // Distribute payments
-        _sendPayment(listing.seller, sellerNet);
+        // Distribute payment
+        _sendPayment(seller, sellerNet);
         _sendPayment(address(feeDistributor), platformFee);
         if (royaltyAmount > 0) {
             _sendPayment(royaltyReceiver, royaltyAmount);
         }
 
-        // Clear listing mapping
-        delete nftToListing[listing.nftContract][listing.tokenId];
-
-        emit NFTSold(
-            listingId,
-            msg.sender,
-            listing.seller,
-            listing.nftContract,
-            listing.tokenId,
-            listing.quantity,
-            price,
+        // Emit events
+        emit NFTTransferred(nftContract, tokenId, seller, buyer, quantity);
+        emit PaymentDistributed(
+            seller,
+            sellerNet,
             platformFee,
-            royaltyAmount,
-            sellerNet
+            royaltyReceiver,
+            royaltyAmount
         );
-    }
-
-    function cancelListing(uint256 listingId) external nonReentrant {
-        Listing storage listing = listings[listingId];
-
-        require(listing.seller == msg.sender, "Not seller");
-        require(listing.active, "Already inactive");
-
-        listing.active = false;
-        delete nftToListing[listing.nftContract][listing.tokenId];
-
-        emit ListingCancelled(
-            listingId,
-            msg.sender,
-            listing.nftContract,
-            listing.tokenId
-        );
-    }
-
-    function updateListingPrice(uint256 listingId, uint256 newPrice) external {
-        Listing storage listing = listings[listingId];
-
-        require(listing.seller == msg.sender, "Not seller");
-        require(listing.active, "Listing not active");
-        require(
-            newPrice > 0 && newPrice <= AssetTypes.MAX_LISTING_PRICE,
-            "Invalid price"
-        );
-
-        uint256 oldPrice = listing.price;
-        listing.price = uint96(newPrice);
-
-        emit ListingPriceUpdated(listingId, oldPrice, newPrice);
     }
 
     // ============================================
-    // VIEW FUNCTIONS
+    //        INTERNAL HELPER FUNCTIONS
     // ============================================
 
-    function getListing(
-        uint256 listingId
-    ) external view returns (Listing memory) {
-        return listings[listingId];
-    }
-
-    function isListingActive(uint256 listingId) external view returns (bool) {
-        return listings[listingId].active;
-    }
-
-    function getSellerListings(
-        address seller
-    ) external view returns (uint256[] memory) {
-        return sellerListings[seller];
-    }
-
-    function getListingByNFT(
+    /**
+     * @notice Transfer NFT from seller to buyer
+     * @dev Reverts if seller doesn't own NFT or hasn't approved marketplace
+     */
+    function _transferNFT(
         address nftContract,
-        uint256 tokenId
-    ) external view returns (uint256) {
-        return nftToListing[nftContract][tokenId];
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 quantity,
+        AssetTypes.TokenStandard standard
+    ) internal {
+        if (standard == AssetTypes.TokenStandard.ERC721) {
+            // Verify ownership
+            if (IERC721(nftContract).ownerOf(tokenId) != from) {
+                revert InsufficientOwnership();
+            }
+
+            // Check approval
+            address approved = IERC721(nftContract).getApproved(tokenId);
+            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(
+                from,
+                marketplaceCore
+            );
+            if (approved != marketplaceCore && !isApprovedForAll) {
+                revert NotApproved();
+            }
+
+            // Transfer
+            IERC721(nftContract).safeTransferFrom(from, to, tokenId);
+        } else {
+            // ERC1155
+            uint256 balance = IERC1155(nftContract).balanceOf(from, tokenId);
+            if (balance < quantity) {
+                revert InsufficientOwnership();
+            }
+
+            // Check approval
+            if (
+                !IERC1155(nftContract).isApprovedForAll(from, marketplaceCore)
+            ) {
+                revert NotApproved();
+            }
+
+            // Transfer
+            IERC1155(nftContract).safeTransferFrom(
+                from,
+                to,
+                tokenId,
+                quantity,
+                ""
+            );
+        }
     }
 
-    function calculatePaymentDistribution(
-        uint256 listingId
-    )
-        external
-        view
-        returns (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        )
-    {
-        Listing memory listing = listings[listingId];
-        uint256 price = uint256(listing.price);
-
-        platformFee = price.percentOf(platformFeeBps);
-        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(
-            listing.nftContract,
-            listing.tokenId,
-            price
-        );
-        sellerNet = price - platformFee - royaltyFee;
-
-        return (platformFee, royaltyFee, sellerNet, royaltyReceiver);
-    }
-
-    // ============================================
-    // INTERNAL FUNCTIONS
-    // ============================================
-
+    /**
+     * @notice Get royalty info from ERC-2981 contract
+     * @dev Returns (address(0), 0) if not supported or reverts
+     */
     function _getRoyaltyInfo(
         address nftContract,
         uint256 tokenId,
@@ -301,6 +228,7 @@ contract NFTMarketplace is INFTMarketplace, ReentrancyGuard, Pausable {
             address _receiver,
             uint256 _amount
         ) {
+            // Cap royalty at maximum allowed
             uint256 maxRoyalty = salePrice.percentOf(
                 AssetTypes.MAX_ROYALTY_BPS
             );
@@ -311,38 +239,53 @@ contract NFTMarketplace is INFTMarketplace, ReentrancyGuard, Pausable {
         }
     }
 
+    /**
+     * @notice Send ETH payment safely
+     * @dev Reverts if transfer fails
+     */
     function _sendPayment(address recipient, uint256 amount) internal {
         if (amount == 0) return;
+
         (bool success, ) = recipient.call{value: amount}("");
         if (!success) revert TransferFailed(recipient, amount);
     }
 
     // ============================================
-    // ADMIN FUNCTIONS
+    //             VIEW FUNCTIONS
     // ============================================
 
-    function updatePlatformFee(uint256 newFeeBps) external {
-        require(
-            roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender),
-            "Not fee manager"
+    /**
+     * @notice Calculate payment distribution for an NFT sale
+     * @param nftContract NFT contract address
+     * @param tokenId Token ID
+     * @param salePrice Total sale price
+     * @return platformFee Platform fee amount
+     * @return royaltyFee Royalty amount
+     * @return sellerNet Net amount to seller
+     * @return royaltyReceiver Address receiving royalty
+     */
+    function calculatePaymentDistribution(
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
+    )
+        external
+        view
+        returns (
+            uint256 platformFee,
+            uint256 royaltyFee,
+            uint256 sellerNet,
+            address royaltyReceiver
+        )
+    {
+        platformFee = salePrice.percentOf(platformFeeBps);
+        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(
+            nftContract,
+            tokenId,
+            salePrice
         );
-        PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
-        platformFeeBps = newFeeBps;
-    }
+        sellerNet = salePrice - platformFee - royaltyFee;
 
-    function pause() external {
-        require(
-            roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender),
-            "Not pauser"
-        );
-        _pause();
-    }
-
-    function unpause() external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
-        _unpause();
+        return (platformFee, royaltyFee, sellerNet, royaltyReceiver);
     }
 }

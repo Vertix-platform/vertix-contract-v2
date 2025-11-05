@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+import "./Errors.sol";
+
 /**
  * @title AssetTypes
  * @notice Library containing type definitions and constants for Vertix marketplace
@@ -55,6 +57,15 @@ library AssetTypes {
     }
 
     /**
+     * @notice Listing type
+     */
+    enum ListingType {
+        FixedPrice, // Standard fixed-price listing
+        Auction, // English auction (ascending bid)
+        OfferOnly // Only accepts offers (no fixed price)
+    }
+
+    /**
      * @notice Token standards for NFTs
      */
     enum TokenStandard {
@@ -100,6 +111,38 @@ library AssetTypes {
     uint256 internal constant MEDIUM_ESCROW = 30 days;
     uint256 internal constant LONG_ESCROW = 90 days;
     uint256 internal constant EXTENDED_ESCROW = 180 days;
+
+    // Auction constants
+    /// @notice Minimum auction duration (1 hour)
+    uint256 internal constant MIN_AUCTION_DURATION = 1 hours;
+
+    /// @notice Maximum auction duration (30 days)
+    uint256 internal constant MAX_AUCTION_DURATION = 30 days;
+
+    /// @notice Minimum bid increment (5%)
+    uint256 internal constant MIN_BID_INCREMENT_BPS = 500;
+
+    /// @notice Default bid increment (5%)
+    uint256 internal constant DEFAULT_BID_INCREMENT_BPS = 500;
+
+    /// @notice Maximum bid increment (50%)
+    uint256 internal constant MAX_BID_INCREMENT_BPS = 5000;
+
+    /// @notice Auction extension time if bid in last minutes (10 minutes)
+    uint256 internal constant AUCTION_EXTENSION_TIME = 10 minutes;
+
+    /// @notice Minimum time before auction end to trigger extension (5 minutes)
+    uint256 internal constant AUCTION_EXTENSION_THRESHOLD = 5 minutes;
+
+    // Offer constants
+    /// @notice Minimum offer duration (1 day)
+    uint256 internal constant MIN_OFFER_DURATION = 1 days;
+
+    /// @notice Maximum offer duration (90 days)
+    uint256 internal constant MAX_OFFER_DURATION = 90 days;
+
+    /// @notice Default offer duration (30 days)
+    uint256 internal constant DEFAULT_OFFER_DURATION = 30 days;
 
     /// @notice Cancellation compensation percentage (10% to seller if already delivered)
     uint256 internal constant CANCELLATION_PENALTY_BPS = 1000;
@@ -164,38 +207,13 @@ library AssetTypes {
     }
 
     /**
-     * @notice Get asset type name as string
-     * @param assetType The asset type
-     * @return Human-readable name
-     */
-    function assetTypeName(
-        AssetType assetType
-    ) internal pure returns (string memory) {
-        if (assetType == AssetType.NFT721) return "NFT (ERC-721)";
-        if (assetType == AssetType.NFT1155) return "NFT (ERC-1155)";
-        if (assetType == AssetType.SocialMediaYouTube) return "YouTube Channel";
-        if (assetType == AssetType.SocialMediaTwitter) return "Twitter Account";
-        if (assetType == AssetType.SocialMediaTwitch) return "Twitch Channel";
-        if (assetType == AssetType.SocialMediaFacebook) return "Facebook Page";
-        if (assetType == AssetType.SocialMediaInstagram)
-            return "Instagram Account";
-        if (assetType == AssetType.SocialMediaTikTok) return "TikTok Account";
-        if (assetType == AssetType.Website) return "Website";
-        if (assetType == AssetType.Domain) return "Domain Name";
-        if (assetType == AssetType.MobileApp) return "Mobile App";
-        if (assetType == AssetType.GameAccount) return "Game Account";
-        return "Other";
-    }
-
-    /**
      * @notice Validate asset type is supported
      * @param assetType The asset type to validate
      */
     function validateAssetType(AssetType assetType) internal pure {
-        require(
-            uint8(assetType) <= uint8(AssetType.Other),
-            "Invalid asset type"
-        );
+        if (uint8(assetType) > uint8(AssetType.Other)) {
+            revert Errors.InvalidAssetType(uint8(assetType));
+        }
     }
 
     /**
@@ -212,33 +230,106 @@ library AssetTypes {
         if (from == EscrowState.None && to == EscrowState.Active) return true;
 
         // Active -> Delivered (seller marks delivered)
-        if (from == EscrowState.Active && to == EscrowState.Delivered)
+        if (from == EscrowState.Active && to == EscrowState.Delivered) {
             return true;
+        }
 
         // Active -> Cancelled (buyer cancels before delivery)
-        if (from == EscrowState.Active && to == EscrowState.Cancelled)
+        if (from == EscrowState.Active && to == EscrowState.Cancelled) {
             return true;
+        }
 
         // Active -> Disputed (dispute opened before delivery)
-        if (from == EscrowState.Active && to == EscrowState.Disputed)
+        if (from == EscrowState.Active && to == EscrowState.Disputed) {
             return true;
+        }
 
         // Delivered -> Completed (buyer confirms or deadline passes)
-        if (from == EscrowState.Delivered && to == EscrowState.Completed)
+        if (from == EscrowState.Delivered && to == EscrowState.Completed) {
             return true;
+        }
 
         // Delivered -> Disputed (buyer opens dispute)
-        if (from == EscrowState.Delivered && to == EscrowState.Disputed)
+        if (from == EscrowState.Delivered && to == EscrowState.Disputed) {
             return true;
+        }
 
         // Disputed -> Completed (admin resolves in favor of seller)
-        if (from == EscrowState.Disputed && to == EscrowState.Completed)
+        if (from == EscrowState.Disputed && to == EscrowState.Completed) {
             return true;
+        }
 
         // Disputed -> Refunded (admin resolves in favor of buyer)
-        if (from == EscrowState.Disputed && to == EscrowState.Refunded)
+        if (from == EscrowState.Disputed && to == EscrowState.Refunded) {
             return true;
+        }
 
         return false;
+    }
+
+    /**
+     * @notice Validate auction duration
+     * @param duration Auction duration in seconds
+     * @return True if valid
+     */
+    function isValidAuctionDuration(
+        uint256 duration
+    ) internal pure returns (bool) {
+        return
+            duration >= MIN_AUCTION_DURATION &&
+            duration <= MAX_AUCTION_DURATION;
+    }
+
+    /**
+     * @notice Validate bid increment percentage
+     * @param incrementBps Bid increment in basis points
+     * @return True if valid
+     */
+    function isValidBidIncrement(
+        uint256 incrementBps
+    ) internal pure returns (bool) {
+        return
+            incrementBps >= MIN_BID_INCREMENT_BPS &&
+            incrementBps <= MAX_BID_INCREMENT_BPS;
+    }
+
+    /**
+     * @notice Validate offer duration
+     * @param duration Offer duration in seconds
+     * @return True if valid
+     */
+    function isValidOfferDuration(
+        uint256 duration
+    ) internal pure returns (bool) {
+        return duration >= MIN_OFFER_DURATION && duration <= MAX_OFFER_DURATION;
+    }
+
+    /**
+     * @notice Check if auction should be extended
+     * @param endTime Current auction end time
+     * @param bidTime Time of the bid
+     * @return True if auction should be extended
+     */
+    function shouldExtendAuction(
+        uint256 endTime,
+        uint256 bidTime
+    ) internal pure returns (bool) {
+        if (bidTime >= endTime) return false; // Already ended
+        return (endTime - bidTime) <= AUCTION_EXTENSION_THRESHOLD;
+    }
+
+    /**
+     * @notice Calculate minimum bid for auction
+     * @param currentBid Current highest bid
+     * @param incrementBps Bid increment in basis points
+     * @return Minimum next bid amount
+     */
+    function calculateMinimumBid(
+        uint256 currentBid,
+        uint256 incrementBps
+    ) internal pure returns (uint256) {
+        if (currentBid == 0) return 0;
+        uint256 increment = (currentBid * incrementBps) / BPS_DENOMINATOR;
+        return currentBid + increment;
     }
 }

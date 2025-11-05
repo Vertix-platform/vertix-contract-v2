@@ -1,0 +1,8 @@
+{
+  "autoFormat": true,
+  "skipTests": false,
+  "skipCoverage": false,
+  "skipGasSnapshot": false,
+  "skipBuildOnCommit": false,
+  "minCoverage": 80
+}

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/token/common/ERC2981.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
-import "../interfaces/IFeeDistributor.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/PercentageMath.sol";
-import "../access/RoleManager.sol";
+import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {IFeeDistributor} from "../interfaces/IFeeDistributor.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {PercentageMath} from "../libraries/PercentageMath.sol";
+import {Errors} from "../libraries/Errors.sol";
+import {RoleManager} from "../access/RoleManager.sol";
 
 /**
  * @title FeeDistributor
@@ -25,7 +26,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     using ERC165Checker for address;
 
     // ============================================
-    // STATE VARIABLES
+    //             STATE VARIABLES
     // ============================================
 
     /// @notice Platform fee in basis points (250 = 2.5%)
@@ -44,7 +45,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     bytes4 private constant INTERFACE_ID_ERC2981 = 0x2a55205a;
 
     // ============================================
-    // CONSTRUCTOR
+    //              CONSTRUCTOR
     // ============================================
 
     /**
@@ -58,8 +59,12 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         address _feeCollector,
         uint256 _platformFeeBps
     ) {
-        require(_roleManager != address(0), "Invalid role manager");
-        require(_feeCollector != address(0), "Invalid fee collector");
+        if (_roleManager == address(0)) {
+            revert Errors.InvalidRoleManager();
+        }
+        if (_feeCollector == address(0)) {
+            revert Errors.InvalidFeeDistributor();
+        }
 
         PercentageMath.validateBps(_platformFeeBps, AssetTypes.MAX_FEE_BPS);
 
@@ -68,8 +73,13 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         platformFeeBps = _platformFeeBps;
     }
 
+    receive() external payable {
+        accumulatedFees += msg.value;
+        emit FeesReceived(msg.sender, msg.value);
+    }
+
     // ============================================
-    // CORE FUNCTIONS
+    //          CORE FUNCTIONS
     // ============================================
 
     /**
@@ -86,17 +96,25 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         address royaltyReceiver,
         uint256 royaltyAmount
     ) external payable nonReentrant {
-        require(msg.value == amount, "Incorrect payment");
-        require(seller != address(0), "Invalid seller");
+        if (msg.value != amount) {
+            revert IncorrectPayment();
+        }
+        if (seller == address(0)) {
+            revert InvalidSeller();
+        }
 
         // Calculate platform fee
         uint256 platformFee = amount.percentOf(platformFeeBps);
 
         // Validate royalty amount doesn't exceed limits
         if (royaltyAmount > 0) {
-            require(royaltyReceiver != address(0), "Invalid royalty receiver");
+            if (royaltyReceiver == address(0)) {
+                revert InvalidRoyaltyReceiver();
+            }
             uint256 maxRoyalty = amount.percentOf(AssetTypes.MAX_ROYALTY_BPS);
-            require(royaltyAmount <= maxRoyalty, "Royalty too high");
+            if (royaltyAmount > maxRoyalty) {
+                revert RoyaltyTooHigh();
+            }
         }
 
         // Calculate seller net
@@ -158,7 +176,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     }
 
     // ============================================
-    // ADMIN FUNCTIONS
+    //          ADMIN FUNCTIONS
     // ============================================
 
     /**
@@ -166,10 +184,9 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param newFeeBps New fee in basis points
      */
     function updatePlatformFee(uint256 newFeeBps) external {
-        require(
-            roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender),
-            "Not fee manager"
-        );
+        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
+            revert Errors.NotFeeManager(msg.sender);
+        }
 
         PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
 
@@ -184,10 +201,9 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param newCollector New fee collector address
      */
     function updateFeeCollector(address newCollector) external {
-        require(
-            roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender),
-            "Not fee manager"
-        );
+        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
+            revert Errors.NotFeeManager(msg.sender);
+        }
 
         if (newCollector == address(0)) revert InvalidFeeCollector();
 
@@ -202,14 +218,20 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @dev Only fee collector can withdraw
      */
     function withdrawFees() external nonReentrant {
-        require(msg.sender == feeCollector, "Not fee collector");
+        if (msg.sender != feeCollector) {
+            revert NotFeeCollector();
+        }
 
         uint256 amount = accumulatedFees;
-        require(amount > 0, "No fees to withdraw");
+        if (amount <= 0) {
+            revert NoFeesToWithdraw();
+        }
 
         accumulatedFees = 0;
 
         _safeTransfer(feeCollector, amount);
+
+        emit FeesWithdrawn(feeCollector, amount);
     }
 
     /**
@@ -217,17 +239,25 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param amount Amount to withdraw
      */
     function withdrawFeesAmount(uint256 amount) external nonReentrant {
-        require(msg.sender == feeCollector, "Not fee collector");
-        require(amount > 0, "Amount must be > 0");
-        require(amount <= accumulatedFees, "Insufficient fees");
+        if (msg.sender != feeCollector) {
+            revert NotFeeCollector();
+        }
+        if (amount <= 0) {
+            revert NoFeesToWithdraw();
+        }
+        if (amount > accumulatedFees) {
+            revert InsufficientFees();
+        }
 
         accumulatedFees -= amount;
 
         _safeTransfer(feeCollector, amount);
+
+        emit FeesWithdrawn(feeCollector, amount);
     }
 
     // ============================================
-    // INTERNAL FUNCTIONS
+    //           INTERNAL FUNCTIONS
     // ============================================
 
     /**
@@ -281,7 +311,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     }
 
     // ============================================
-    // VIEW FUNCTIONS
+    //           VIEW FUNCTIONS
     // ============================================
 
     /**

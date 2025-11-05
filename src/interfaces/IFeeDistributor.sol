@@ -50,10 +50,27 @@ interface IFeeDistributor {
         address indexed newCollector
     );
 
+    /**
+     * @notice Emitted when fees are received by the distributor
+     */
+    event FeesReceived(address indexed from, uint256 amount);
+
+    /**
+     * @notice Emitted when accumulated fees are withdrawn
+     */
+    event FeesWithdrawn(address indexed collector, uint256 amount);
+
     // ============================================
     //                ERRORS
     // ============================================
 
+    error IncorrectPayment();
+    error InvalidSeller();
+    error InvalidRoyaltyReceiver();
+    error NotFeeCollector();
+    error NoFeesToWithdraw();
+    error InsufficientFees();
+    error RoyaltyTooHigh();
     error InvalidFeeCollector();
     error InvalidFeeBps(uint256 bps);
     error DistributionFailed(address recipient, uint256 amount);

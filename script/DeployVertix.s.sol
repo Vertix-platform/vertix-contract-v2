@@ -61,18 +61,14 @@ contract DeployVertix is Script {
         // 2. DEPLOY FEE DISTRIBUTOR
         // ============================================
         console.log("\n2. Deploying FeeDistributor...");
-        feeDistributor = address(
-            new FeeDistributor(roleManager, feeCollector, PLATFORM_FEE_BPS)
-        );
+        feeDistributor = address(new FeeDistributor(roleManager, feeCollector, PLATFORM_FEE_BPS));
         console.log("   FeeDistributor deployed at:", feeDistributor);
 
         // ============================================
         // 3. DEPLOY ESCROW MANAGER
         // ============================================
         console.log("\n3. Deploying EscrowManager...");
-        escrowManager = address(
-            new EscrowManager(roleManager, feeDistributor, PLATFORM_FEE_BPS)
-        );
+        escrowManager = address(new EscrowManager(roleManager, feeDistributor, PLATFORM_FEE_BPS));
         console.log("   EscrowManager deployed at:", escrowManager);
 
         // ============================================
@@ -86,9 +82,7 @@ contract DeployVertix is Script {
         // 5. DEPLOY NFT MARKETPLACE
         // ============================================
         console.log("\n5. Deploying NFTMarketplace...");
-        nftMarketplace = address(
-            new NFTMarketplace(roleManager, feeDistributor, PLATFORM_FEE_BPS)
-        );
+        nftMarketplace = address(new NFTMarketplace(roleManager, feeDistributor, PLATFORM_FEE_BPS));
         console.log("   NFTMarketplace deployed at:", nftMarketplace);
 
         // ============================================
@@ -96,10 +90,7 @@ contract DeployVertix is Script {
         // ============================================
         console.log("\n6. Deploying VerificationRegistry...");
         verificationRegistry = address(new VerificationRegistry(roleManager));
-        console.log(
-            "   VerificationRegistry deployed at:",
-            verificationRegistry
-        );
+        console.log("   VerificationRegistry deployed at:", verificationRegistry);
 
         // ============================================
         // 7. DEPLOY REPUTATION MANAGER
@@ -112,9 +103,7 @@ contract DeployVertix is Script {
         // 8. DEPLOY MARKETPLACE CORE
         // ============================================
         console.log("\n8. Deploying MarketplaceCore...");
-        marketplaceCore = address(
-            new MarketplaceCore(roleManager, escrowManager, nftMarketplace)
-        );
+        marketplaceCore = address(new MarketplaceCore(roleManager, escrowManager, nftMarketplace));
         console.log("   MarketplaceCore deployed at:", marketplaceCore);
 
         vm.stopBroadcast();
@@ -122,10 +111,7 @@ contract DeployVertix is Script {
         // ============================================
         // PRINT DEPLOYMENT SUMMARY
         // ============================================
-        console.log(
-            "\n"
-            "========================================"
-        );
+        console.log("\n" "========================================");
         console.log("VERTIX MARKETPLACE DEPLOYMENT COMPLETE");
         console.log("========================================");
         console.log("RoleManager:", roleManager);

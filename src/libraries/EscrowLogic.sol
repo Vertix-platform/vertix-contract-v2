@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import "./AssetTypes.sol";
+import "./Errors.sol";
 
 /**
  * @title EscrowLogic
@@ -87,7 +88,7 @@ library EscrowLogic {
      * @param hash The hash to validate
      */
     function validateHash(bytes32 hash) internal pure {
-        require(hash != bytes32(0), "Invalid hash: empty");
+        if (hash == bytes32(0)) revert Errors.InvalidHash();
     }
 
     /**
@@ -95,8 +96,9 @@ library EscrowLogic {
      * @param uri The URI to validate
      */
     function validateMetadataURI(string calldata uri) internal pure {
-        require(bytes(uri).length > 0, "Invalid URI: empty");
-        require(bytes(uri).length <= 256, "URI too long");
+        if (bytes(uri).length == 0) revert Errors.EmptyString("metadataURI");
+        if (bytes(uri).length > 256)
+            revert Errors.StringTooLong(bytes(uri).length, 256);
     }
 
     // ============================================

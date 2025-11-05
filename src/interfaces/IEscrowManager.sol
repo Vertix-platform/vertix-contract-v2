@@ -21,7 +21,8 @@ interface IEscrowManager {
         address buyer;
         uint96 amount; // (up to 79B ETH)
         address seller; //
-        address paymentToken; // (address(0) for native)
+        address paymentToken;
+        // (address(0) for native)
         AssetTypes.AssetType assetType;
         AssetTypes.EscrowState state;
         uint32 createdAt;
@@ -178,6 +179,7 @@ interface IEscrowManager {
 
     /**
      * @notice Create a new escrow for digital asset purchase
+     * @param buyer Address of the asset buyer (explicitly passed for marketplace integrations)
      * @param seller Address of the asset seller
      * @param assetType Type of asset being sold
      * @param duration Escrow duration in seconds
@@ -186,6 +188,7 @@ interface IEscrowManager {
      * @return escrowId Unique identifier for the created escrow
      */
     function createEscrow(
+        address buyer,
         address seller,
         AssetTypes.AssetType assetType,
         uint256 duration,
@@ -275,24 +278,6 @@ interface IEscrowManager {
     ) external view returns (uint256[] memory);
 
     /**
-     * @notice Check if escrow can be released
-     * @param escrowId Escrow identifier
-     * @return True if releasable
-     */
-    function canReleaseEscrow(uint256 escrowId) external view returns (bool);
-
-    /**
-     * @notice Check if escrow can be cancelled
-     * @param escrowId Escrow identifier
-     * @param caller Address attempting to cancel
-     * @return True if cancellable
-     */
-    function canCancelEscrow(
-        uint256 escrowId,
-        address caller
-    ) external view returns (bool);
-
-    /**
      * @notice Get current platform fee
      * @return Fee in basis points (250 = 2.5%)
      */
@@ -303,13 +288,4 @@ interface IEscrowManager {
      * @return Escrow counter
      */
     function escrowCounter() external view returns (uint256);
-
-    /**
-     * @notice Get metadata URI for an escrow
-     * @param escrowId Escrow identifier
-     * @return IPFS URI
-     */
-    function getEscrowMetadata(
-        uint256 escrowId
-    ) external view returns (string memory);
 }

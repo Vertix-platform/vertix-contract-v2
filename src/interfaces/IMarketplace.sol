@@ -5,8 +5,8 @@ import {AssetTypes} from "../libraries/AssetTypes.sol";
 
 /**
  * @title IMarketplace
- * @notice Interface for main marketplace orchestrator
- * @dev Routes listings to appropriate handlers (NFT or Escrow)
+ * @notice Interface for unified marketplace router
+ * @dev Routes NFT and off-chain asset listings to appropriate handlers
  */
 interface IMarketplace {
     // ============================================
@@ -48,28 +48,52 @@ interface IMarketplace {
     event ListingCancelled(uint256 indexed listingId, address indexed seller);
 
     // ============================================
-    //                   ERRORS
+    //          LISTING FUNCTIONS
     // ============================================
 
-    error InvalidListing();
-    error UnauthorizedAccess();
+    /**
+     * @notice Create NFT listing
+     */
+    function createNFTListing(
+        address nftContract,
+        uint256 tokenId,
+        uint256 quantity,
+        uint256 price,
+        AssetTypes.TokenStandard standard
+    ) external returns (uint256 listingId);
 
-    // ============================================
-    //                FUNCTIONS
-    // ============================================
-
-    function createListing(
+    /**
+     * @notice Create off-chain asset listing
+     */
+    function createOffChainListing(
         AssetTypes.AssetType assetType,
         uint256 price,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external payable returns (uint256 listingId);
+    ) external returns (uint256 listingId);
 
+    /**
+     * @notice Purchase any asset (auto-routes)
+     */
     function purchaseAsset(uint256 listingId) external payable;
 
+    /**
+     * @notice Cancel listing
+     */
     function cancelListing(uint256 listingId) external;
 
-    function getListing(
-        uint256 listingId
-    ) external view returns (Listing memory);
+    /**
+     * @notice Update listing price
+     */
+    function updatePrice(uint256 listingId, uint256 newPrice) external;
+
+    // ============================================
+    //             VIEW FUNCTIONS
+    // ============================================
+
+    function getListing(uint256 listingId) external view returns (Listing memory);
+    
+    function getSellerListings(address seller) external view returns (uint256[] memory);
+    
+    function isNFTListing(uint256 listingId) external view returns (bool);
 }

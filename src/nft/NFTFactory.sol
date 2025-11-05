@@ -3,26 +3,23 @@ pragma solidity 0.8.20;
 
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "./VertixNFT721.sol";
-import "./VertixNFT1155.sol";
-import "../access/RoleManager.sol";
-import "../libraries/AssetTypes.sol";
+import {VertixNFT721} from "./VertixNFT721.sol";
+import {VertixNFT1155} from "./VertixNFT1155.sol";
+import {RoleManager} from "../access/RoleManager.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 /**
  * @title NFTFactory
  * @notice Factory for deploying NFT collections via minimal proxies (EIP-1167)
  * @dev 10x cheaper deployment using clone pattern
  *
- * Gas Savings:
- * - Full deployment: ~500k gas
- * - Minimal proxy: ~45k gas
- * - Savings: ~455k gas per collection
  */
 contract NFTFactory is ReentrancyGuard {
     using Clones for address;
 
     // ============================================
-    // STATE VARIABLES
+    //            STATE VARIABLES
     // ============================================
 
     /// @notice ERC-721 implementation contract
@@ -47,7 +44,7 @@ contract NFTFactory is ReentrancyGuard {
     mapping(address => bool) public isVertixCollection;
 
     // ============================================
-    // EVENTS
+    //                EVENTS
     // ============================================
 
     event Collection721Created(
@@ -67,40 +64,22 @@ contract NFTFactory is ReentrancyGuard {
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
 
     // ============================================
-    // CONSTRUCTOR
+    //           CONSTRUCTOR
     // ============================================
 
     constructor(address _roleManager) {
-        require(_roleManager != address(0), "Invalid role manager");
+        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         roleManager = RoleManager(_roleManager);
 
         // Deploy implementation contracts
-        nft721Implementation = address(
-            new VertixNFT721(
-                "Vertix721Implementation",
-                "V721",
-                address(this),
-                address(this),
-                0,
-                0,
-                ""
-            )
-        );
-
-        nft1155Implementation = address(
-            new VertixNFT1155(
-                "Vertix1155Implementation",
-                "V1155",
-                "",
-                address(this),
-                address(this),
-                0
-            )
-        );
+        // Note: These will have _disableInitializers() called in their constructors
+        // to prevent the implementation from being initialized
+        nft721Implementation = address(new VertixNFT721());
+        nft1155Implementation = address(new VertixNFT1155());
     }
 
     // ============================================
-    // COLLECTION CREATION
+    //          COLLECTION CREATION
     // ============================================
 
     /**
@@ -114,16 +93,24 @@ contract NFTFactory is ReentrancyGuard {
         uint256 maxSupply,
         string memory baseURI
     ) external payable nonReentrant returns (address collection) {
-        require(msg.value >= creationFee, "Insufficient creation fee");
-        require(bytes(name).length > 0, "Empty name");
-        require(bytes(symbol).length > 0, "Empty symbol");
+        if (msg.value < creationFee)
+            revert Errors.InsufficientPayment(msg.value, creationFee);
+        if (bytes(name).length == 0) revert Errors.EmptyString("name");
+        if (bytes(symbol).length == 0) revert Errors.EmptyString("symbol");
 
         // Clone implementation
         collection = nft721Implementation.clone();
 
-        // Initialize (call constructor-like function)
-        // Note: Actual implementation would need initializer pattern
-        // For simplicity, showing structure
+        // Initialize the clone with provided parameters
+        VertixNFT721(collection).initialize(
+            name,
+            symbol,
+            msg.sender, // creator
+            royaltyReceiver,
+            royaltyFeeBps,
+            maxSupply,
+            baseURI
+        );
 
         // Track collection
         allCollections.push(collection);
@@ -145,11 +132,22 @@ contract NFTFactory is ReentrancyGuard {
         address royaltyReceiver,
         uint96 royaltyFeeBps
     ) external payable nonReentrant returns (address collection) {
-        require(msg.value >= creationFee, "Insufficient creation fee");
-        require(bytes(name).length > 0, "Empty name");
+        if (msg.value < creationFee)
+            revert Errors.InsufficientPayment(msg.value, creationFee);
+        if (bytes(name).length == 0) revert Errors.EmptyString("name");
 
         // Clone implementation
         collection = nft1155Implementation.clone();
+
+        // Initialize the clone with provided parameters
+        VertixNFT1155(collection).initialize(
+            name,
+            symbol,
+            uri,
+            msg.sender, // creator
+            royaltyReceiver,
+            royaltyFeeBps
+        );
 
         // Track collection
         allCollections.push(collection);
@@ -162,14 +160,13 @@ contract NFTFactory is ReentrancyGuard {
     }
 
     // ============================================
-    // ADMIN
+    //              ADMIN
     // ============================================
 
     function setCreationFee(uint256 newFee) external {
-        require(
-            roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender),
-            "Not fee manager"
-        );
+        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
+            revert Errors.NotFeeManager(msg.sender);
+        }
 
         uint256 oldFee = creationFee;
         creationFee = newFee;
@@ -178,33 +175,14 @@ contract NFTFactory is ReentrancyGuard {
     }
 
     function withdrawFees() external {
-        require(
-            roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender),
-            "Not admin"
-        );
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
 
         uint256 balance = address(this).balance;
-        require(balance > 0, "No fees to withdraw");
+        if (balance == 0) revert Errors.NoFeesToWithdraw();
 
         (bool success, ) = msg.sender.call{value: balance}("");
-        require(success, "Transfer failed");
-    }
-
-    // ============================================
-    // VIEW
-    // ============================================
-
-    function getCreatorCollections(
-        address creator
-    ) external view returns (address[] memory) {
-        return creatorCollections[creator];
-    }
-
-    function getAllCollections() external view returns (address[] memory) {
-        return allCollections;
-    }
-
-    function getTotalCollections() external view returns (uint256) {
-        return allCollections.length;
+        if (!success) revert Errors.TransferFailed(msg.sender, balance);
     }
 }

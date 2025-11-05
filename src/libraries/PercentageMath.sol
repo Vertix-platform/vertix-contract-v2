@@ -36,10 +36,7 @@ library PercentageMath {
      * @dev Returns 0 if either input is 0
      * @dev Uses standard rounding (floor)
      */
-    function percentOf(
-        uint256 amount,
-        uint256 bps
-    ) internal pure returns (uint256) {
+    function percentOf(uint256 amount, uint256 bps) internal pure returns (uint256) {
         if (amount == 0 || bps == 0) return 0;
         return (amount * bps) / BP_BASE;
     }
@@ -52,10 +49,7 @@ library PercentageMath {
      *
      * @dev Useful for ensuring minimum fees are collected
      */
-    function percentOfRoundUp(
-        uint256 amount,
-        uint256 bps
-    ) internal pure returns (uint256) {
+    function percentOfRoundUp(uint256 amount, uint256 bps) internal pure returns (uint256) {
         if (amount == 0 || bps == 0) return 0;
         return (amount * bps + BP_BASE - 1) / BP_BASE;
     }
@@ -68,10 +62,7 @@ library PercentageMath {
      *
      * @dev Example: subtractPercent(1000, 250) = 975 (deducted 2.5%)
      */
-    function subtractPercent(
-        uint256 amount,
-        uint256 bps
-    ) internal pure returns (uint256) {
+    function subtractPercent(uint256 amount, uint256 bps) internal pure returns (uint256) {
         if (amount == 0 || bps == 0) return amount;
         return amount - percentOf(amount, bps);
     }
@@ -84,10 +75,7 @@ library PercentageMath {
      *
      * @dev Example: addPercent(1000, 250) = 1025 (added 2.5%)
      */
-    function addPercent(
-        uint256 amount,
-        uint256 bps
-    ) internal pure returns (uint256) {
+    function addPercent(uint256 amount, uint256 bps) internal pure returns (uint256) {
         if (amount == 0 || bps == 0) return amount;
         return amount + percentOf(amount, bps);
     }
@@ -137,11 +125,11 @@ library PercentageMath {
      *      Royalty: 10% = 1000
      *      Seller: remainder = 8750
      */
-    function splitThreeWay(
-        uint256 amount,
-        uint256 bps1,
-        uint256 bps2
-    ) internal pure returns (uint256 part1, uint256 part2, uint256 remainder) {
+    function splitThreeWay(uint256 amount, uint256 bps1, uint256 bps2)
+        internal
+        pure
+        returns (uint256 part1, uint256 part2, uint256 remainder)
+    {
         if (amount == 0) return (0, 0, 0);
 
         part1 = percentOf(amount, bps1);
@@ -163,10 +151,7 @@ library PercentageMath {
      *
      * @dev Example: splitTwoWay(10000, 250) = (250, 9750)
      */
-    function splitTwoWay(
-        uint256 amount,
-        uint256 bps1
-    ) internal pure returns (uint256 part1, uint256 remainder) {
+    function splitTwoWay(uint256 amount, uint256 bps1) internal pure returns (uint256 part1, uint256 remainder) {
         if (amount == 0) return (0, 0);
 
         part1 = percentOf(amount, bps1);
@@ -188,12 +173,7 @@ library PercentageMath {
      *
      * @dev Useful for complex fee structures with multiple recipients
      */
-    function splitFourWay(
-        uint256 amount,
-        uint256 bps1,
-        uint256 bps2,
-        uint256 bps3
-    )
+    function splitFourWay(uint256 amount, uint256 bps1, uint256 bps2, uint256 bps3)
         internal
         pure
         returns (uint256 part1, uint256 part2, uint256 part3, uint256 remainder)
@@ -221,10 +201,7 @@ library PercentageMath {
      * @dev Example: calculateBps(250, 1000) = 2500 (25%)
      * @dev Returns 0 if whole is 0
      */
-    function calculateBps(
-        uint256 part,
-        uint256 whole
-    ) internal pure returns (uint256) {
+    function calculateBps(uint256 part, uint256 whole) internal pure returns (uint256) {
         if (whole == 0) return 0;
         return (part * BP_BASE) / whole;
     }
@@ -235,10 +212,7 @@ library PercentageMath {
      * @param bps The percentage to deduct
      * @return True if result would be zero
      */
-    function wouldResultInZero(
-        uint256 amount,
-        uint256 bps
-    ) internal pure returns (bool) {
+    function wouldResultInZero(uint256 amount, uint256 bps) internal pure returns (bool) {
         return amount > 0 && subtractPercent(amount, bps) == 0;
     }
 
@@ -251,18 +225,13 @@ library PercentageMath {
      * @dev Example: minAmountForTarget(975, 250) = 1000
      *      To get 975 after 2.5% fee, need to start with 1000
      */
-    function minAmountForTarget(
-        uint256 targetAmount,
-        uint256 feeBps
-    ) internal pure returns (uint256) {
+    function minAmountForTarget(uint256 targetAmount, uint256 feeBps) internal pure returns (uint256) {
         if (targetAmount == 0 || feeBps == 0) return targetAmount;
         if (feeBps >= BP_BASE) revert InvalidBasisPoints(feeBps);
 
         // Formula: amount = target / (1 - fee%)
         // In basis points: amount = target * BP_BASE / (BP_BASE - feeBps)
-        return
-            (targetAmount * BP_BASE + (BP_BASE - feeBps - 1)) /
-            (BP_BASE - feeBps);
+        return (targetAmount * BP_BASE + (BP_BASE - feeBps - 1)) / (BP_BASE - feeBps);
     }
 
     /**
@@ -286,10 +255,7 @@ library PercentageMath {
      * @param maxTotal Maximum allowed total
      * @return True if sum exceeds max
      */
-    function exceedsTotal(
-        uint256[] memory bps,
-        uint256 maxTotal
-    ) internal pure returns (bool) {
+    function exceedsTotal(uint256[] memory bps, uint256 maxTotal) internal pure returns (bool) {
         return sumBps(bps) > maxTotal;
     }
 }

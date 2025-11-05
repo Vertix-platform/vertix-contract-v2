@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
-import "@openzeppelin/contracts/token/common/ERC2981.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/PercentageMath.sol";
+import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
+import {ERC721URIStorageUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
+import {ERC721BurnableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
+import {ERC2981Upgradeable} from "@openzeppelin/contracts-upgradeable/token/common/ERC2981Upgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {PercentageMath} from "../libraries/PercentageMath.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 /**
  * @title VertixNFT721
  * @notice ERC-721 collection template with royalties and batch minting
- * @dev Used by NFTFactory to deploy user collections
+ * @dev Used by NFTFactory to deploy user collections via minimal proxy pattern
  *
  * Features:
  * - ERC-721 standard compliance
@@ -26,17 +28,28 @@ import "../libraries/PercentageMath.sol";
  * - Creator ownership
  */
 contract VertixNFT721 is
-    ERC721,
-    ERC721URIStorage,
-    ERC721Burnable,
-    ERC2981,
-    Ownable,
-    Pausable
+    Initializable,
+    ERC721Upgradeable,
+    ERC721URIStorageUpgradeable,
+    ERC721BurnableUpgradeable,
+    ERC2981Upgradeable,
+    OwnableUpgradeable,
+    PausableUpgradeable
 {
     using PercentageMath for uint256;
 
     // ============================================
-    // STATE VARIABLES
+    //           ERRORS
+    // ============================================
+
+    error MaxSupplyReached();
+    error InvalidRoyalty(uint256 bps);
+    error InvalidMaxSupply(uint256 supply);
+    error ExceedsMaxSupply(uint256 requested, uint256 available);
+    error EmptyBatch();
+
+    // ============================================
+    //          STATE VARIABLES
     // ============================================
 
     /// @notice Current token ID counter
@@ -55,7 +68,7 @@ contract VertixNFT721 is
     address public creator;
 
     // ============================================
-    // EVENTS
+    //             EVENTS
     // ============================================
 
     event BatchMinted(
@@ -68,21 +81,19 @@ contract VertixNFT721 is
     event BaseURIUpdated(string newBaseURI);
 
     // ============================================
-    // ERRORS
-    // ============================================
-
-    error MaxSupplyReached();
-    error InvalidRoyalty(uint256 bps);
-    error InvalidMaxSupply(uint256 supply);
-    error ExceedsMaxSupply(uint256 requested, uint256 available);
-    error EmptyBatch();
-
-    // ============================================
-    // CONSTRUCTOR
+    //               CONSTRUCTOR
     // ============================================
 
     /**
-     * @notice Initialize NFT collection
+     * @notice Constructor for implementation contract (called once)
+     * @dev Disables initializers to prevent implementation from being initialized
+     */
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initialize NFT collection (called by factory after cloning)
      * @param name_ Collection name
      * @param symbol_ Collection symbol
      * @param creator_ Collection creator address
@@ -90,8 +101,9 @@ contract VertixNFT721 is
      * @param royaltyFeeBps_ Royalty fee in basis points (max 1000 = 10%)
      * @param maxSupply_ Maximum supply (0 = unlimited)
      * @param baseURI_ Base URI for token metadata
+     * @dev Can only be called once per clone due to initializer modifier
      */
-    constructor(
+    function initialize(
         string memory name_,
         string memory symbol_,
         address creator_,
@@ -99,8 +111,17 @@ contract VertixNFT721 is
         uint96 royaltyFeeBps_,
         uint256 maxSupply_,
         string memory baseURI_
-    ) ERC721(name_, symbol_) Ownable(creator_) {
-        require(creator_ != address(0), "Invalid creator");
+    ) external initializer {
+        // Validate creator
+        if (creator_ == address(0)) revert Errors.InvalidCreator();
+
+        // Initialize parent contracts
+        __ERC721_init(name_, symbol_);
+        __ERC721URIStorage_init();
+        __ERC721Burnable_init();
+        __ERC2981_init();
+        __Ownable_init(creator_);
+        __Pausable_init();
 
         // Validate and set royalty
         if (royaltyFeeBps_ > AssetTypes.MAX_ROYALTY_BPS) {
@@ -108,17 +129,19 @@ contract VertixNFT721 is
         }
 
         if (royaltyFeeBps_ > 0) {
-            require(royaltyReceiver_ != address(0), "Invalid royalty receiver");
+            if (royaltyReceiver_ == address(0))
+                revert Errors.InvalidRoyaltyReceiver();
             _setDefaultRoyalty(royaltyReceiver_, royaltyFeeBps_);
         }
 
+        // Set state variables
         creator = creator_;
         maxSupply = maxSupply_;
         _baseTokenURI = baseURI_;
     }
 
     // ============================================
-    // MINTING FUNCTIONS
+    //         EXTERNAL FUNCTIONS
     // ============================================
 
     /**
@@ -136,8 +159,8 @@ contract VertixNFT721 is
             revert MaxSupplyReached();
         }
 
-        tokenId = _tokenIdCounter++;
-        totalMinted++;
+        tokenId = ++_tokenIdCounter;
+        ++totalMinted;
 
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
@@ -181,45 +204,8 @@ contract VertixNFT721 is
         return startTokenId;
     }
 
-    /**
-     * @notice Batch mint with same URI (cheaper)
-     * @param to Recipient address
-     * @param quantity Number of tokens to mint
-     * @param baseUri Base URI (will append tokenId)
-     * @return startTokenId First token ID in batch
-     */
-    function batchMintSameURI(
-        address to,
-        uint256 quantity,
-        string memory baseUri
-    ) external onlyOwner whenNotPaused returns (uint256 startTokenId) {
-        if (quantity == 0) revert EmptyBatch();
-
-        // Check max supply
-        if (maxSupply > 0) {
-            uint256 available = maxSupply - totalMinted;
-            if (quantity > available) {
-                revert ExceedsMaxSupply(quantity, available);
-            }
-        }
-
-        startTokenId = _tokenIdCounter;
-
-        for (uint256 i = 0; i < quantity; i++) {
-            uint256 tokenId = _tokenIdCounter++;
-            _safeMint(to, tokenId);
-            // Note: Using base URI, frontend can construct full URI
-        }
-
-        totalMinted += quantity;
-
-        emit BatchMinted(to, startTokenId, quantity);
-
-        return startTokenId;
-    }
-
     // ============================================
-    // ROYALTY FUNCTIONS
+    //         ROYALTY FUNCTIONS
     // ============================================
 
     /**
@@ -315,33 +301,7 @@ contract VertixNFT721 is
     }
 
     // ============================================
-    // VIEW FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Get next token ID to be minted
-     */
-    function nextTokenId() external view returns (uint256) {
-        return _tokenIdCounter;
-    }
-
-    /**
-     * @notice Check if max supply reached
-     */
-    function isMaxSupplyReached() external view returns (bool) {
-        return maxSupply > 0 && totalMinted >= maxSupply;
-    }
-
-    /**
-     * @notice Get remaining supply
-     */
-    function remainingSupply() external view returns (uint256) {
-        if (maxSupply == 0) return type(uint256).max; // Unlimited
-        return maxSupply - totalMinted;
-    }
-
-    // ============================================
-    // OVERRIDES
+    //             OVERRIDES
     // ============================================
 
     function _baseURI() internal view override returns (string memory) {
@@ -350,7 +310,12 @@ contract VertixNFT721 is
 
     function tokenURI(
         uint256 tokenId
-    ) public view override(ERC721, ERC721URIStorage) returns (string memory) {
+    )
+        public
+        view
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        returns (string memory)
+    {
         return super.tokenURI(tokenId);
     }
 
@@ -364,7 +329,16 @@ contract VertixNFT721 is
 
     function supportsInterface(
         bytes4 interfaceId
-    ) public view override(ERC721, ERC721URIStorage, ERC2981) returns (bool) {
+    )
+        public
+        view
+        override(
+            ERC721Upgradeable,
+            ERC721URIStorageUpgradeable,
+            ERC2981Upgradeable
+        )
+        returns (bool)
+    {
         return super.supportsInterface(interfaceId);
     }
 }

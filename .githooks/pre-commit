@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Pre-commit hook for Solidity projects
+# Automatically formats code and runs basic checks before commit
+
+set -e
+
+BOLD="\033[1m"
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+BLUE="\033[0;34m"
+RESET="\033[0m"
+
+echo ""
+echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${BOLD}${BLUE}  📝 Pre-Commit Validation${RESET}"
+echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+
+# Load configuration if exists
+CONFIG_FILE=".forge-hooks.json"
+AUTO_FORMAT=true
+SKIP_BUILD=false
+
+if [ -f "$CONFIG_FILE" ]; then
+    AUTO_FORMAT=$(cat "$CONFIG_FILE" | grep -o '"autoFormat":[^,}]*' | cut -d':' -f2 | tr -d ' ' || echo "true")
+    SKIP_BUILD=$(cat "$CONFIG_FILE" | grep -o '"skipBuildOnCommit":[^,}]*' | cut -d':' -f2 | tr -d ' ' || echo "false")
+fi
+
+# Check if we should skip hooks
+if [ -n "$SKIP_HOOKS" ] || [ -n "$NO_VERIFY" ]; then
+    echo -e "${YELLOW}⚠️  Skipping pre-commit hooks${RESET}"
+    exit 0
+fi
+
+FAILED=0
+
+# Function to print step header
+print_step() {
+    echo ""
+    echo -e "${BOLD}${BLUE}▶ $1${RESET}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Function to print success
+print_success() {
+    echo -e "${GREEN}✓ $1${RESET}"
+}
+
+# Function to print error
+print_error() {
+    echo -e "${RED}✗ $1${RESET}"
+}
+
+# Function to print warning
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${RESET}"
+}
+
+# Get list of staged Solidity files
+STAGED_SOL_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sol$' || true)
+
+if [ -z "$STAGED_SOL_FILES" ]; then
+    echo -e "${YELLOW}No Solidity files staged for commit${RESET}"
+    echo ""
+    exit 0
+fi
+
+# 1. Auto-format staged files
+if [ "$AUTO_FORMAT" = "true" ]; then
+    print_step "Step 1: Auto-formatting Solidity files"
+
+    forge fmt $STAGED_SOL_FILES
+
+    # Re-stage formatted files
+    git add $STAGED_SOL_FILES
+
+    print_success "Code formatted and re-staged"
+else
+    # Check formatting without modifying
+    print_step "Step 1: Checking code formatting"
+
+    if forge fmt --check > /dev/null 2>&1; then
+        print_success "Code formatting is correct"
+    else
+        print_error "Code formatting check failed"
+        echo ""
+        echo -e "${YELLOW}Run 'forge fmt' to fix formatting issues${RESET}"
+        FAILED=1
+    fi
+fi
+
+# 2. Quick syntax check (build)
+if [ "$SKIP_BUILD" != "true" ]; then
+    print_step "Step 2: Checking contract compilation"
+
+    if forge build --force > /dev/null 2>&1; then
+        print_success "Contracts compile successfully"
+    else
+        print_error "Compilation failed"
+        echo ""
+        echo -e "${YELLOW}Run 'forge build' to see detailed errors${RESET}"
+        FAILED=1
+    fi
+else
+    print_warning "Skipping build check (configured in .forge-hooks.json)"
+fi
+
+# 3. Check for common issues
+print_step "Step 3: Checking for common issues"
+
+# Check for console.log imports (should not be in production)
+CONSOLE_IMPORTS=$(echo "$STAGED_SOL_FILES" | xargs grep -l "import.*console" 2>/dev/null || true)
+if [ -n "$CONSOLE_IMPORTS" ]; then
+    print_warning "Found console.log imports (consider removing for production):"
+    echo "$CONSOLE_IMPORTS" | while read file; do
+        echo "  - $file"
+    done
+fi
+
+# Check for TODO comments
+TODOS=$(echo "$STAGED_SOL_FILES" | xargs grep -n "TODO\|FIXME\|XXX" 2>/dev/null || true)
+if [ -n "$TODOS" ]; then
+    print_warning "Found TODO/FIXME comments:"
+    echo "$TODOS" | head -5
+    TODO_COUNT=$(echo "$TODOS" | wc -l)
+    if [ "$TODO_COUNT" -gt 5 ]; then
+        echo "  ... and $((TODO_COUNT - 5)) more"
+    fi
+fi
+
+# Check for hardcoded addresses (potential security issue)
+HARDCODED=$(echo "$STAGED_SOL_FILES" | xargs grep -n "0x[0-9a-fA-F]\{40\}" 2>/dev/null | grep -v "address(0)" | grep -v "// " || true)
+if [ -n "$HARDCODED" ]; then
+    print_warning "Found potential hardcoded addresses:"
+    echo "$HARDCODED" | head -3
+fi
+
+if [ -z "$CONSOLE_IMPORTS" ] && [ -z "$TODOS" ] && [ -z "$HARDCODED" ]; then
+    print_success "No common issues found"
+fi
+
+# Final Result
+echo ""
+echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+
+if [ $FAILED -eq 1 ]; then
+    echo -e "${BOLD}${RED}✗ Pre-commit validation FAILED${RESET}"
+    echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    echo -e "${YELLOW}To skip these checks temporarily, use:${RESET}"
+    echo -e "${YELLOW}  git commit --no-verify${RESET}"
+    echo ""
+    exit 1
+else
+    echo -e "${BOLD}${GREEN}✓ Pre-commit validation passed!${RESET}"
+    echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    exit 0
+fi
