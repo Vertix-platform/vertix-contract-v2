@@ -63,7 +63,9 @@ interface IMarketplace {
         uint256 quantity,
         uint256 price,
         AssetTypes.TokenStandard standard
-    ) external returns (uint256 listingId);
+    )
+        external
+        returns (uint256 listingId);
 
     /**
      * @notice Create off-chain asset listing
@@ -73,7 +75,9 @@ interface IMarketplace {
         uint256 price,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external returns (uint256 listingId);
+    )
+        external
+        returns (uint256 listingId);
 
     /**
      * @notice Purchase any asset (auto-routes)

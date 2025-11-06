@@ -108,7 +108,13 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         uint256 duration,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external payable whenNotPaused nonReentrant returns (uint256 escrowId) {
+    )
+        external
+        payable
+        whenNotPaused
+        nonReentrant
+        returns (uint256 escrowId)
+    {
         // Validate buyer and seller are different
         if (buyer == seller) revert Errors.BuyerCannotBeSeller();
 

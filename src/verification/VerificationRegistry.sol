@@ -94,7 +94,11 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         bytes32 proofHash,
         uint256 expiresAt,
         string calldata metadataURI
-    ) external nonReentrant returns (uint256 verificationId) {
+    )
+        external
+        nonReentrant
+        returns (uint256 verificationId)
+    {
         // Only whitelisted verifiers can add proofs
         if (!whitelistedVerifiers[msg.sender]) {
             revert UnauthorizedVerifier(msg.sender);
@@ -186,7 +190,10 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         uint256 newExpiresAt,
         bytes32 newProofHash,
         string calldata newMetadataURI
-    ) external nonReentrant {
+    )
+        external
+        nonReentrant
+    {
         _validateVerificationExists(verificationId);
 
         Verification storage verification = verifications[verificationId];
@@ -327,7 +334,10 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     /**
      * @notice Get verification ID for owner + asset type
      */
-    function getVerificationByOwnerAndType(address owner, AssetTypes.AssetType assetType)
+    function getVerificationByOwnerAndType(
+        address owner,
+        AssetTypes.AssetType assetType
+    )
         external
         view
         returns (uint256)

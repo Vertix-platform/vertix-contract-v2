@@ -66,7 +66,10 @@ library EscrowLogic {
      *
      * @dev Reverts if transition is invalid
      */
-    function validateStateTransition(AssetTypes.EscrowState currentState, AssetTypes.EscrowState newState)
+    function validateStateTransition(
+        AssetTypes.EscrowState currentState,
+        AssetTypes.EscrowState newState
+    )
         internal
         pure
     {
@@ -201,7 +204,10 @@ library EscrowLogic {
      *
      * @dev If seller already delivered, they get 10% compensation for wasted effort
      */
-    function calculateCancellationFees(uint256 amount, bool sellerDelivered)
+    function calculateCancellationFees(
+        uint256 amount,
+        bool sellerDelivered
+    )
         internal
         pure
         returns (uint256 buyerRefund, uint256 sellerCompensation)
@@ -349,11 +355,11 @@ library EscrowLogic {
 
         // Different maximums for different asset types
         if (AssetTypes.isSocialMediaType(assetType)) {
-            return amount <= 10000 ether; // Max 10k ETH for social media
+            return amount <= 10_000 ether; // Max 10k ETH for social media
         }
 
         if (assetType == AssetTypes.AssetType.Website) {
-            return amount <= 50000 ether; // Max 50k ETH for websites
+            return amount <= 50_000 ether; // Max 50k ETH for websites
         }
 
         // General max

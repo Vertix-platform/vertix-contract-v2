@@ -104,7 +104,7 @@ library AssetTypes {
     uint256 internal constant MAX_ROYALTY_BPS = 1000;
 
     /// @notice Basis points denominator (100%)
-    uint256 internal constant BPS_DENOMINATOR = 10000;
+    uint256 internal constant BPS_DENOMINATOR = 10_000;
 
     /// @notice Minimum escrow duration (1 day)
     uint256 internal constant MIN_ESCROW_DURATION = 1 days;

@@ -120,7 +120,9 @@ interface IVerificationRegistry {
         bytes32 proofHash,
         uint256 expiresAt,
         string calldata metadataURI
-    ) external returns (uint256 verificationId);
+    )
+        external
+        returns (uint256 verificationId);
 
     /**
      * @notice Revoke a verification
@@ -143,7 +145,8 @@ interface IVerificationRegistry {
         uint256 newExpiresAt,
         bytes32 newProofHash,
         string calldata newMetadataURI
-    ) external;
+    )
+        external;
 
     /**
      * @notice Add verifier to whitelist (admin only)
@@ -189,7 +192,10 @@ interface IVerificationRegistry {
      * @param assetType Asset type
      * @return verificationId (0 if not found)
      */
-    function getVerificationByOwnerAndType(address owner, AssetTypes.AssetType assetType)
+    function getVerificationByOwnerAndType(
+        address owner,
+        AssetTypes.AssetType assetType
+    )
         external
         view
         returns (uint256);

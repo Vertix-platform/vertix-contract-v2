@@ -111,7 +111,12 @@ contract NFTMarketplace is ReentrancyGuard {
         uint256 tokenId,
         uint256 quantity,
         AssetTypes.TokenStandard standard
-    ) external payable onlyMarketplaceCore nonReentrant {
+    )
+        external
+        payable
+        onlyMarketplaceCore
+        nonReentrant
+    {
         if (nftContract == address(0)) revert InvalidNFTContract();
 
         uint256 price = msg.value;
@@ -151,7 +156,9 @@ contract NFTMarketplace is ReentrancyGuard {
         uint256 tokenId,
         uint256 quantity,
         AssetTypes.TokenStandard standard
-    ) internal {
+    )
+        internal
+    {
         if (standard == AssetTypes.TokenStandard.ERC721) {
             // Verify ownership
             if (IERC721(nftContract).ownerOf(tokenId) != from) {
@@ -188,7 +195,11 @@ contract NFTMarketplace is ReentrancyGuard {
      * @notice Get royalty info from ERC-2981 contract
      * @dev Returns (address(0), 0) if not supported or reverts
      */
-    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice)
+    function _getRoyaltyInfo(
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
+    )
         internal
         view
         returns (address receiver, uint256 royaltyAmount)
@@ -228,7 +239,11 @@ contract NFTMarketplace is ReentrancyGuard {
      * @return sellerNet Net amount to seller
      * @return royaltyReceiver Address receiving royalty
      */
-    function calculatePaymentDistribution(address nftContract, uint256 tokenId, uint256 salePrice)
+    function calculatePaymentDistribution(
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
+    )
         external
         view
         returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)

@@ -52,7 +52,9 @@ interface INFTMarketplace {
         uint256 tokenId,
         uint256 quantity,
         AssetTypes.TokenStandard standard
-    ) external payable;
+    )
+        external
+        payable;
 
     // ============================================
     //             VIEW FUNCTIONS
@@ -68,7 +70,11 @@ interface INFTMarketplace {
      * @return sellerNet Net amount to seller
      * @return royaltyReceiver Address receiving royalty
      */
-    function calculatePaymentDistribution(address nftContract, uint256 tokenId, uint256 salePrice)
+    function calculatePaymentDistribution(
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
+    )
         external
         view
         returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver);

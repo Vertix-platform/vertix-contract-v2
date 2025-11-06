@@ -82,7 +82,12 @@ contract NFTFactory is ReentrancyGuard {
         uint96 royaltyFeeBps,
         uint256 maxSupply,
         string memory baseURI
-    ) external payable nonReentrant returns (address collection) {
+    )
+        external
+        payable
+        nonReentrant
+        returns (address collection)
+    {
         if (msg.value < creationFee) {
             revert Errors.InsufficientPayment(msg.value, creationFee);
         }
@@ -122,7 +127,12 @@ contract NFTFactory is ReentrancyGuard {
         string memory uri,
         address royaltyReceiver,
         uint96 royaltyFeeBps
-    ) external payable nonReentrant returns (address collection) {
+    )
+        external
+        payable
+        nonReentrant
+        returns (address collection)
+    {
         if (msg.value < creationFee) {
             revert Errors.InsufficientPayment(msg.value, creationFee);
         }

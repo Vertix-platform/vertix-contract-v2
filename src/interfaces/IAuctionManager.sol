@@ -164,7 +164,9 @@ interface IAuctionManager {
         AssetTypes.TokenStandard standard,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external returns (uint256 auctionId);
+    )
+        external
+        returns (uint256 auctionId);
 
     /**
      * @notice Place a bid on an auction

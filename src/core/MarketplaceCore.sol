@@ -103,7 +103,12 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         uint256 quantity,
         uint256 price,
         AssetTypes.TokenStandard standard
-    ) external whenNotPaused nonReentrant returns (uint256 listingId) {
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 listingId)
+    {
         if (price == 0 || price > AssetTypes.MAX_LISTING_PRICE) {
             revert InvalidPrice();
         }
@@ -178,7 +183,12 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         uint256 price,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external whenNotPaused nonReentrant returns (uint256 listingId) {
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 listingId)
+    {
         if (price == 0) revert InvalidPrice();
         assetType.validateAssetType();
         if (assetType.isNFTType()) revert Errors.UseCreateNFTListing();

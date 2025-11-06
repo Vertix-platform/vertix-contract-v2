@@ -37,7 +37,12 @@ library AuctionLogic {
      * @param duration Auction duration in seconds
      * @param bidIncrementBps Minimum bid increment in basis points
      */
-    function validateAuctionParams(address seller, uint256 reservePrice, uint256 duration, uint256 bidIncrementBps)
+    function validateAuctionParams(
+        address seller,
+        uint256 reservePrice,
+        uint256 duration,
+        uint256 bidIncrementBps
+    )
         internal
         pure
     {
@@ -76,7 +81,10 @@ library AuctionLogic {
         uint256 bidIncrementBps,
         uint256 startTime,
         uint256 endTime
-    ) internal view {
+    )
+        internal
+        view
+    {
         // Check bidder is not seller
         if (bidder == seller) {
             revert BidderCannotBeSeller(bidder);

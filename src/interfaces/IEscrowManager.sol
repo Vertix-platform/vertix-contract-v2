@@ -162,7 +162,10 @@ interface IEscrowManager {
         uint256 duration,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external payable returns (uint256 escrowId);
+    )
+        external
+        payable
+        returns (uint256 escrowId);
 
     /**
      * @notice Seller marks asset as delivered

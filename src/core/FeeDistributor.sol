@@ -86,7 +86,12 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param royaltyAmount Royalty amount (0 if none)
      * @dev Must be called with exact amount as msg.value
      */
-    function distributeSaleProceeds(address seller, uint256 amount, address royaltyReceiver, uint256 royaltyAmount)
+    function distributeSaleProceeds(
+        address seller,
+        uint256 amount,
+        address royaltyReceiver,
+        uint256 royaltyAmount
+    )
         external
         payable
         nonReentrant
@@ -136,7 +141,11 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param tokenId Token ID (for royalty lookup)
      * @return distribution PaymentDistribution struct with breakdown
      */
-    function calculateDistribution(uint256 amount, address nftContract, uint256 tokenId)
+    function calculateDistribution(
+        uint256 amount,
+        address nftContract,
+        uint256 tokenId
+    )
         external
         view
         returns (PaymentDistribution memory distribution)
@@ -250,7 +259,11 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @return royaltyAmount Royalty amount
      * @dev Returns (address(0), 0) if contract doesn't support ERC-2981
      */
-    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice)
+    function _getRoyaltyInfo(
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
+    )
         internal
         view
         returns (address receiver, uint256 royaltyAmount)

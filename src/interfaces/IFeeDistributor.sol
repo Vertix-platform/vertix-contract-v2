@@ -76,11 +76,20 @@ interface IFeeDistributor {
     //             FUNCTIONS
     // ============================================
 
-    function distributeSaleProceeds(address seller, uint256 amount, address royaltyReceiver, uint256 royaltyAmount)
+    function distributeSaleProceeds(
+        address seller,
+        uint256 amount,
+        address royaltyReceiver,
+        uint256 royaltyAmount
+    )
         external
         payable;
 
-    function calculateDistribution(uint256 amount, address nftContract, uint256 tokenId)
+    function calculateDistribution(
+        uint256 amount,
+        address nftContract,
+        uint256 tokenId
+    )
         external
         view
         returns (PaymentDistribution memory);

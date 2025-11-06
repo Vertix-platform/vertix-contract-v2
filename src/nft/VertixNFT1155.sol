@@ -68,7 +68,10 @@ contract VertixNFT1155 is
         address creator_,
         address royaltyReceiver_,
         uint96 royaltyFeeBps_
-    ) external initializer {
+    )
+        external
+        initializer
+    {
         // Initialize parent contracts
         __ERC1155_init(uri_);
         __ERC1155Burnable_init();
@@ -90,7 +93,11 @@ contract VertixNFT1155 is
     //            MINTING
     // ============================================
 
-    function create(uint256 initialSupply, string memory tokenURI, uint256 maxSupply_)
+    function create(
+        uint256 initialSupply,
+        string memory tokenURI,
+        uint256 maxSupply_
+    )
         external
         onlyOwner
         returns (uint256 tokenId)
@@ -123,7 +130,11 @@ contract VertixNFT1155 is
         _mint(to, tokenId, amount, "");
     }
 
-    function mintBatch(address to, uint256[] memory tokenIds, uint256[] memory amounts)
+    function mintBatch(
+        address to,
+        uint256[] memory tokenIds,
+        uint256[] memory amounts
+    )
         external
         onlyOwner
         whenNotPaused
@@ -169,7 +180,12 @@ contract VertixNFT1155 is
     //             OVERRIDES
     // ============================================
 
-    function _update(address from, address to, uint256[] memory ids, uint256[] memory values)
+    function _update(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory values
+    )
         internal
         override(ERC1155Upgradeable, ERC1155SupplyUpgradeable)
         whenNotPaused

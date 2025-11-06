@@ -335,7 +335,10 @@ contract RoleManager is AccessControl, Pausable {
      * @param accounts Array of addresses (must match roles length)
      * @dev For initial setup, skips timelock
      */
-    function batchGrantRoles(bytes32[] calldata roles, address[] calldata accounts)
+    function batchGrantRoles(
+        bytes32[] calldata roles,
+        address[] calldata accounts
+    )
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
     {

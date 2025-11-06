@@ -127,7 +127,12 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         AssetTypes.TokenStandard standard,
         bytes32 assetHash,
         string calldata metadataURI
-    ) external whenNotPaused nonReentrant returns (uint256 auctionId) {
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 auctionId)
+    {
         // Validate parameters
         AuctionLogic.validateAuctionParams(msg.sender, reservePrice, duration, bidIncrementBps);
 
@@ -279,7 +284,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Refund previous bidder using pull-over-push pattern to prevent DoS
         if (previousBidder != address(0) && previousBid > 0) {
             // Try to refund immediately, but queue if it fails
-            (bool success,) = previousBidder.call{value: previousBid, gas: 10000}("");
+            (bool success,) = previousBidder.call{value: previousBid, gas: 10_000}("");
 
             if (success) {
                 emit BidRefunded(auctionId, previousBidder, previousBid);
@@ -506,7 +511,9 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         uint256 tokenId,
         uint256 quantity,
         AssetTypes.TokenStandard standard
-    ) internal {
+    )
+        internal
+    {
         if (standard == AssetTypes.TokenStandard.ERC721) {
             IERC721(nftContract).safeTransferFrom(from, to, tokenId);
         } else {
@@ -517,7 +524,12 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Calculate and distribute payment (platform fee, royalty, seller)
      */
-    function _calculateAndDistributePayment(address nftContract, uint256 tokenId, uint256 amount, address seller)
+    function _calculateAndDistributePayment(
+        address nftContract,
+        uint256 tokenId,
+        uint256 amount,
+        address seller
+    )
         internal
         returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)
     {
@@ -547,7 +559,11 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Get royalty info from ERC-2981 contract
      */
-    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice)
+    function _getRoyaltyInfo(
+        address nftContract,
+        uint256 tokenId,
+        uint256 salePrice
+    )
         internal
         view
         returns (address receiver, uint256 royaltyAmount)
@@ -728,7 +744,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @return actualHash Computed hash from provided details
      * @dev Useful for buyers to verify asset authenticity before/after auction
      */
-    function verifyAssetHash(uint256 auctionId, string calldata assetDetails)
+    function verifyAssetHash(
+        uint256 auctionId,
+        string calldata assetDetails
+    )
         external
         view
         returns (bool isValid, bytes32 expectedHash, bytes32 actualHash)

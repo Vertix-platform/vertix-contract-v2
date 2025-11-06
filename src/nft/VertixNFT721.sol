@@ -120,7 +120,10 @@ contract VertixNFT721 is
         uint96 royaltyFeeBps_,
         uint256 maxSupply_,
         string memory baseURI_
-    ) external initializer {
+    )
+        external
+        initializer
+    {
         // Validate creator
         if (creator_ == address(0)) revert Errors.InvalidCreator();
 
@@ -181,7 +184,10 @@ contract VertixNFT721 is
      * @param uris Array of token URIs
      * @return startTokenId First token ID in batch
      */
-    function batchMint(address to, string[] memory uris)
+    function batchMint(
+        address to,
+        string[] memory uris
+    )
         external
         onlyOwner
         whenNotPaused

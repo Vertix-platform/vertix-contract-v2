@@ -13,7 +13,7 @@ pragma solidity ^0.8.24;
  */
 library PercentageMath {
     /// @notice Basis points denominator (100%)
-    uint256 internal constant BP_BASE = 10000;
+    uint256 internal constant BP_BASE = 10_000;
 
     // ============================================
     //         CUSTOM ERRORS
@@ -125,7 +125,11 @@ library PercentageMath {
      *      Royalty: 10% = 1000
      *      Seller: remainder = 8750
      */
-    function splitThreeWay(uint256 amount, uint256 bps1, uint256 bps2)
+    function splitThreeWay(
+        uint256 amount,
+        uint256 bps1,
+        uint256 bps2
+    )
         internal
         pure
         returns (uint256 part1, uint256 part2, uint256 remainder)
@@ -173,7 +177,12 @@ library PercentageMath {
      *
      * @dev Useful for complex fee structures with multiple recipients
      */
-    function splitFourWay(uint256 amount, uint256 bps1, uint256 bps2, uint256 bps3)
+    function splitFourWay(
+        uint256 amount,
+        uint256 bps1,
+        uint256 bps2,
+        uint256 bps3
+    )
         internal
         pure
         returns (uint256 part1, uint256 part2, uint256 part3, uint256 remainder)

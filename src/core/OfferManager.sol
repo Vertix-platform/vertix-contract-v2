@@ -115,7 +115,10 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
      * @return offerId Unique offer identifier
      * @dev Offer amount is msg.value, funds are locked in contract
      */
-    function makeOffer(uint256 listingId, uint256 duration)
+    function makeOffer(
+        uint256 listingId,
+        uint256 duration
+    )
         external
         payable
         whenNotPaused
