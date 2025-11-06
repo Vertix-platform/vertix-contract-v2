@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -54,11 +54,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param _feeCollector Address to receive platform fees
      * @param _platformFeeBps Initial platform fee in basis points
      */
-    constructor(
-        address _roleManager,
-        address _feeCollector,
-        uint256 _platformFeeBps
-    ) {
+    constructor(address _roleManager, address _feeCollector, uint256 _platformFeeBps) {
         if (_roleManager == address(0)) {
             revert Errors.InvalidRoleManager();
         }
@@ -90,12 +86,11 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param royaltyAmount Royalty amount (0 if none)
      * @dev Must be called with exact amount as msg.value
      */
-    function distributeSaleProceeds(
-        address seller,
-        uint256 amount,
-        address royaltyReceiver,
-        uint256 royaltyAmount
-    ) external payable nonReentrant {
+    function distributeSaleProceeds(address seller, uint256 amount, address royaltyReceiver, uint256 royaltyAmount)
+        external
+        payable
+        nonReentrant
+    {
         if (msg.value != amount) {
             revert IncorrectPayment();
         }
@@ -131,14 +126,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         // Transfer to seller
         _safeTransfer(seller, sellerNet);
 
-        emit PaymentDistributed(
-            seller,
-            msg.sender,
-            amount,
-            platformFee,
-            royaltyAmount,
-            sellerNet
-        );
+        emit PaymentDistributed(seller, msg.sender, amount, platformFee, royaltyAmount, sellerNet);
     }
 
     /**
@@ -148,29 +136,22 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param tokenId Token ID (for royalty lookup)
      * @return distribution PaymentDistribution struct with breakdown
      */
-    function calculateDistribution(
-        uint256 amount,
-        address nftContract,
-        uint256 tokenId
-    ) external view returns (PaymentDistribution memory distribution) {
+    function calculateDistribution(uint256 amount, address nftContract, uint256 tokenId)
+        external
+        view
+        returns (PaymentDistribution memory distribution)
+    {
         // Calculate platform fee
         distribution.platformFee = amount.percentOf(platformFeeBps);
 
         // Try to get royalty info (ERC-2981)
-        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(
-            nftContract,
-            tokenId,
-            amount
-        );
+        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(nftContract, tokenId, amount);
 
         distribution.royaltyReceiver = royaltyReceiver;
         distribution.royaltyFee = royaltyAmount;
 
         // Calculate seller net
-        distribution.sellerNet =
-            amount -
-            distribution.platformFee -
-            distribution.royaltyFee;
+        distribution.sellerNet = amount - distribution.platformFee - distribution.royaltyFee;
 
         return distribution;
     }
@@ -269,25 +250,20 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @return royaltyAmount Royalty amount
      * @dev Returns (address(0), 0) if contract doesn't support ERC-2981
      */
-    function _getRoyaltyInfo(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    ) internal view returns (address receiver, uint256 royaltyAmount) {
+    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice)
+        internal
+        view
+        returns (address receiver, uint256 royaltyAmount)
+    {
         // Check if contract supports ERC-2981
         if (!nftContract.supportsInterface(INTERFACE_ID_ERC2981)) {
             return (address(0), 0);
         }
 
         // Try to get royalty info
-        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (
-            address _receiver,
-            uint256 _royaltyAmount
-        ) {
+        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (address _receiver, uint256 _royaltyAmount) {
             // Validate royalty doesn't exceed maximum
-            uint256 maxRoyalty = salePrice.percentOf(
-                AssetTypes.MAX_ROYALTY_BPS
-            );
+            uint256 maxRoyalty = salePrice.percentOf(AssetTypes.MAX_ROYALTY_BPS);
             if (_royaltyAmount > maxRoyalty) {
                 _royaltyAmount = maxRoyalty;
             }
@@ -306,7 +282,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     function _safeTransfer(address recipient, uint256 amount) internal {
         if (amount == 0) return;
 
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         if (!success) revert DistributionFailed(recipient, amount);
     }
 
@@ -319,9 +295,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param amount Sale amount
      * @return Platform fee
      */
-    function calculatePlatformFee(
-        uint256 amount
-    ) external view returns (uint256) {
+    function calculatePlatformFee(uint256 amount) external view returns (uint256) {
         return amount.percentOf(platformFeeBps);
     }
 
@@ -331,10 +305,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param royaltyAmount Royalty amount (if known)
      * @return Net amount to seller
      */
-    function calculateSellerNet(
-        uint256 amount,
-        uint256 royaltyAmount
-    ) external view returns (uint256) {
+    function calculateSellerNet(uint256 amount, uint256 royaltyAmount) external view returns (uint256) {
         uint256 platformFee = amount.percentOf(platformFeeBps);
         return amount - platformFee - royaltyAmount;
     }
@@ -344,9 +315,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @param nftContract NFT contract address
      * @return True if supports ERC-2981
      */
-    function supportsRoyalties(
-        address nftContract
-    ) external view returns (bool) {
+    function supportsRoyalties(address nftContract) external view returns (bool) {
         return nftContract.supportsInterface(INTERFACE_ID_ERC2981);
     }
 }

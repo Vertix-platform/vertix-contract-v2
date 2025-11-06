@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
@@ -50,19 +50,11 @@ contract NFTMarketplace is ReentrancyGuard {
     // ============================================
 
     event NFTTransferred(
-        address indexed nftContract,
-        uint256 indexed tokenId,
-        address indexed from,
-        address to,
-        uint256 quantity
+        address indexed nftContract, uint256 indexed tokenId, address indexed from, address to, uint256 quantity
     );
 
     event PaymentDistributed(
-        address indexed seller,
-        uint256 sellerNet,
-        uint256 platformFee,
-        address royaltyReceiver,
-        uint256 royaltyAmount
+        address indexed seller, uint256 sellerNet, uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount
     );
 
     // ============================================
@@ -84,15 +76,13 @@ contract NFTMarketplace is ReentrancyGuard {
      * @param _feeDistributor Address of fee distributor
      * @param _platformFeeBps Platform fee in basis points
      */
-    constructor(
-        address _marketplaceCore,
-        address _feeDistributor,
-        uint256 _platformFeeBps
-    ) {
-        if (_marketplaceCore == address(0))
+    constructor(address _marketplaceCore, address _feeDistributor, uint256 _platformFeeBps) {
+        if (_marketplaceCore == address(0)) {
             revert Errors.InvalidMarketplaceCore();
-        if (_feeDistributor == address(0))
+        }
+        if (_feeDistributor == address(0)) {
             revert Errors.InvalidFeeDistributor();
+        }
         PercentageMath.validateBps(_platformFeeBps, AssetTypes.MAX_FEE_BPS);
 
         marketplaceCore = _marketplaceCore;
@@ -128,11 +118,7 @@ contract NFTMarketplace is ReentrancyGuard {
 
         // Calculate fees
         uint256 platformFee = price.percentOf(platformFeeBps);
-        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(
-            nftContract,
-            tokenId,
-            price
-        );
+        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(nftContract, tokenId, price);
         uint256 sellerNet = price - platformFee - royaltyAmount;
 
         // Transfer NFT (Checks-Effects-Interactions)
@@ -147,13 +133,7 @@ contract NFTMarketplace is ReentrancyGuard {
 
         // Emit events
         emit NFTTransferred(nftContract, tokenId, seller, buyer, quantity);
-        emit PaymentDistributed(
-            seller,
-            sellerNet,
-            platformFee,
-            royaltyReceiver,
-            royaltyAmount
-        );
+        emit PaymentDistributed(seller, sellerNet, platformFee, royaltyReceiver, royaltyAmount);
     }
 
     // ============================================
@@ -180,10 +160,7 @@ contract NFTMarketplace is ReentrancyGuard {
 
             // Check approval
             address approved = IERC721(nftContract).getApproved(tokenId);
-            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(
-                from,
-                marketplaceCore
-            );
+            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(from, marketplaceCore);
             if (approved != marketplaceCore && !isApprovedForAll) {
                 revert NotApproved();
             }
@@ -198,20 +175,12 @@ contract NFTMarketplace is ReentrancyGuard {
             }
 
             // Check approval
-            if (
-                !IERC1155(nftContract).isApprovedForAll(from, marketplaceCore)
-            ) {
+            if (!IERC1155(nftContract).isApprovedForAll(from, marketplaceCore)) {
                 revert NotApproved();
             }
 
             // Transfer
-            IERC1155(nftContract).safeTransferFrom(
-                from,
-                to,
-                tokenId,
-                quantity,
-                ""
-            );
+            IERC1155(nftContract).safeTransferFrom(from, to, tokenId, quantity, "");
         }
     }
 
@@ -219,19 +188,14 @@ contract NFTMarketplace is ReentrancyGuard {
      * @notice Get royalty info from ERC-2981 contract
      * @dev Returns (address(0), 0) if not supported or reverts
      */
-    function _getRoyaltyInfo(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    ) internal view returns (address receiver, uint256 royaltyAmount) {
-        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (
-            address _receiver,
-            uint256 _amount
-        ) {
+    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice)
+        internal
+        view
+        returns (address receiver, uint256 royaltyAmount)
+    {
+        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (address _receiver, uint256 _amount) {
             // Cap royalty at maximum allowed
-            uint256 maxRoyalty = salePrice.percentOf(
-                AssetTypes.MAX_ROYALTY_BPS
-            );
+            uint256 maxRoyalty = salePrice.percentOf(AssetTypes.MAX_ROYALTY_BPS);
             if (_amount > maxRoyalty) _amount = maxRoyalty;
             return (_receiver, _amount);
         } catch {
@@ -246,7 +210,7 @@ contract NFTMarketplace is ReentrancyGuard {
     function _sendPayment(address recipient, uint256 amount) internal {
         if (amount == 0) return;
 
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         if (!success) revert TransferFailed(recipient, amount);
     }
 
@@ -264,26 +228,13 @@ contract NFTMarketplace is ReentrancyGuard {
      * @return sellerNet Net amount to seller
      * @return royaltyReceiver Address receiving royalty
      */
-    function calculatePaymentDistribution(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    )
+    function calculatePaymentDistribution(address nftContract, uint256 tokenId, uint256 salePrice)
         external
         view
-        returns (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        )
+        returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)
     {
         platformFee = salePrice.percentOf(platformFeeBps);
-        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(
-            nftContract,
-            tokenId,
-            salePrice
-        );
+        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(nftContract, tokenId, salePrice);
         sellerNet = salePrice - platformFee - royaltyFee;
 
         return (platformFee, royaltyFee, sellerNet, royaltyReceiver);

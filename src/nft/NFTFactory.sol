@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -47,19 +47,9 @@ contract NFTFactory is ReentrancyGuard {
     //                EVENTS
     // ============================================
 
-    event Collection721Created(
-        address indexed collection,
-        address indexed creator,
-        string name,
-        string symbol
-    );
+    event Collection721Created(address indexed collection, address indexed creator, string name, string symbol);
 
-    event Collection1155Created(
-        address indexed collection,
-        address indexed creator,
-        string name,
-        string symbol
-    );
+    event Collection1155Created(address indexed collection, address indexed creator, string name, string symbol);
 
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
 
@@ -93,8 +83,9 @@ contract NFTFactory is ReentrancyGuard {
         uint256 maxSupply,
         string memory baseURI
     ) external payable nonReentrant returns (address collection) {
-        if (msg.value < creationFee)
+        if (msg.value < creationFee) {
             revert Errors.InsufficientPayment(msg.value, creationFee);
+        }
         if (bytes(name).length == 0) revert Errors.EmptyString("name");
         if (bytes(symbol).length == 0) revert Errors.EmptyString("symbol");
 
@@ -132,8 +123,9 @@ contract NFTFactory is ReentrancyGuard {
         address royaltyReceiver,
         uint96 royaltyFeeBps
     ) external payable nonReentrant returns (address collection) {
-        if (msg.value < creationFee)
+        if (msg.value < creationFee) {
             revert Errors.InsufficientPayment(msg.value, creationFee);
+        }
         if (bytes(name).length == 0) revert Errors.EmptyString("name");
 
         // Clone implementation
@@ -182,7 +174,7 @@ contract NFTFactory is ReentrancyGuard {
         uint256 balance = address(this).balance;
         if (balance == 0) revert Errors.NoFeesToWithdraw();
 
-        (bool success, ) = msg.sender.call{value: balance}("");
+        (bool success,) = msg.sender.call{value: balance}("");
         if (!success) revert Errors.TransferFailed(msg.sender, balance);
     }
 }

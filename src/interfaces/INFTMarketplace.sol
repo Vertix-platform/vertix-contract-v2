@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
@@ -14,19 +14,11 @@ interface INFTMarketplace {
     // ============================================
 
     event NFTTransferred(
-        address indexed nftContract,
-        uint256 indexed tokenId,
-        address indexed from,
-        address to,
-        uint256 quantity
+        address indexed nftContract, uint256 indexed tokenId, address indexed from, address to, uint256 quantity
     );
 
     event PaymentDistributed(
-        address indexed seller,
-        uint256 sellerNet,
-        uint256 platformFee,
-        address royaltyReceiver,
-        uint256 royaltyAmount
+        address indexed seller, uint256 sellerNet, uint256 platformFee, address royaltyReceiver, uint256 royaltyAmount
     );
 
     // ============================================
@@ -76,19 +68,10 @@ interface INFTMarketplace {
      * @return sellerNet Net amount to seller
      * @return royaltyReceiver Address receiving royalty
      */
-    function calculatePaymentDistribution(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    )
+    function calculatePaymentDistribution(address nftContract, uint256 tokenId, uint256 salePrice)
         external
         view
-        returns (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        );
+        returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver);
 
     function marketplaceCore() external view returns (address);
     function platformFeeBps() external view returns (uint256);

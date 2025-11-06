@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
@@ -58,12 +58,7 @@ interface IVerificationRegistry {
      * @param revokedBy Who revoked (admin or verifier)
      * @param reason Revocation reason
      */
-    event VerificationRevoked(
-        uint256 indexed verificationId,
-        address indexed owner,
-        address revokedBy,
-        string reason
-    );
+    event VerificationRevoked(uint256 indexed verificationId, address indexed owner, address revokedBy, string reason);
 
     /**
      * @notice Emitted when verification is renewed
@@ -73,10 +68,7 @@ interface IVerificationRegistry {
      * @param renewalCount How many times renewed
      */
     event VerificationRenewed(
-        uint256 indexed verificationId,
-        address indexed owner,
-        uint256 newExpiresAt,
-        uint256 renewalCount
+        uint256 indexed verificationId, address indexed owner, uint256 newExpiresAt, uint256 renewalCount
     );
 
     /**
@@ -136,10 +128,7 @@ interface IVerificationRegistry {
      * @param reason Reason for revocation
      * @dev Can be called by verifier or admin
      */
-    function revokeVerification(
-        uint256 verificationId,
-        string calldata reason
-    ) external;
+    function revokeVerification(uint256 verificationId, string calldata reason) external;
 
     /**
      * @notice Renew an existing verification
@@ -178,28 +167,21 @@ interface IVerificationRegistry {
      * @param assetType Type of asset
      * @return True if has active, non-expired verification
      */
-    function isVerified(
-        address owner,
-        AssetTypes.AssetType assetType
-    ) external view returns (bool);
+    function isVerified(address owner, AssetTypes.AssetType assetType) external view returns (bool);
 
     /**
      * @notice Get verification details
      * @param verificationId Verification ID
      * @return Verification struct
      */
-    function getVerification(
-        uint256 verificationId
-    ) external view returns (Verification memory);
+    function getVerification(uint256 verificationId) external view returns (Verification memory);
 
     /**
      * @notice Get all verifications for an owner
      * @param owner Asset owner
      * @return Array of verification IDs
      */
-    function getOwnerVerifications(
-        address owner
-    ) external view returns (uint256[] memory);
+    function getOwnerVerifications(address owner) external view returns (uint256[] memory);
 
     /**
      * @notice Get verification ID for owner + asset type
@@ -207,10 +189,10 @@ interface IVerificationRegistry {
      * @param assetType Asset type
      * @return verificationId (0 if not found)
      */
-    function getVerificationByOwnerAndType(
-        address owner,
-        AssetTypes.AssetType assetType
-    ) external view returns (uint256);
+    function getVerificationByOwnerAndType(address owner, AssetTypes.AssetType assetType)
+        external
+        view
+        returns (uint256);
 
     /**
      * @notice Check if verification is expired

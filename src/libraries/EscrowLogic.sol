@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import "./AssetTypes.sol";
 import "./Errors.sol";
@@ -22,10 +22,7 @@ library EscrowLogic {
     error InvalidAmount(uint256 amount);
     error DurationTooShort(uint256 provided, uint256 minimum);
     error DurationTooLong(uint256 provided, uint256 maximum);
-    error InvalidEscrowState(
-        AssetTypes.EscrowState current,
-        AssetTypes.EscrowState required
-    );
+    error InvalidEscrowState(AssetTypes.EscrowState current, AssetTypes.EscrowState required);
     error EscrowNotReleasable();
     error EscrowNotCancellable();
     error VerificationPeriodNotEnded(uint256 currentTime, uint256 deadline);
@@ -43,12 +40,7 @@ library EscrowLogic {
      *
      * @dev Reverts if any parameter is invalid
      */
-    function validateEscrowParams(
-        address buyer,
-        address seller,
-        uint256 amount,
-        uint256 duration
-    ) internal pure {
+    function validateEscrowParams(address buyer, address seller, uint256 amount, uint256 duration) internal pure {
         // Validate addresses
         if (buyer == address(0)) revert InvalidBuyer(buyer);
         if (seller == address(0)) revert InvalidSeller(seller);
@@ -74,10 +66,10 @@ library EscrowLogic {
      *
      * @dev Reverts if transition is invalid
      */
-    function validateStateTransition(
-        AssetTypes.EscrowState currentState,
-        AssetTypes.EscrowState newState
-    ) internal pure {
+    function validateStateTransition(AssetTypes.EscrowState currentState, AssetTypes.EscrowState newState)
+        internal
+        pure
+    {
         if (!AssetTypes.isValidStateTransition(currentState, newState)) {
             revert InvalidEscrowState(currentState, newState);
         }
@@ -97,8 +89,9 @@ library EscrowLogic {
      */
     function validateMetadataURI(string calldata uri) internal pure {
         if (bytes(uri).length == 0) revert Errors.EmptyString("metadataURI");
-        if (bytes(uri).length > 256)
+        if (bytes(uri).length > 256) {
             revert Errors.StringTooLong(bytes(uri).length, 256);
+        }
     }
 
     // ============================================
@@ -114,16 +107,10 @@ library EscrowLogic {
      *
      * @dev Verification deadline is midpoint to encourage early checking
      */
-    function calculateDeadlines(
-        uint256 duration
-    )
+    function calculateDeadlines(uint256 duration)
         internal
         view
-        returns (
-            uint256 releaseTime,
-            uint256 verificationDeadline,
-            uint256 disputeDeadline
-        )
+        returns (uint256 releaseTime, uint256 verificationDeadline, uint256 disputeDeadline)
     {
         releaseTime = block.timestamp + duration;
         verificationDeadline = block.timestamp + (duration / 2); // First half for verification
@@ -138,10 +125,7 @@ library EscrowLogic {
      * @param duration Escrow duration
      * @return release Release timestamp
      */
-    function calculateReleaseTime(
-        uint256 createdAt,
-        uint256 duration
-    ) internal pure returns (uint256 release) {
+    function calculateReleaseTime(uint256 createdAt, uint256 duration) internal pure returns (uint256 release) {
         release = createdAt + duration;
         return release;
     }
@@ -161,11 +145,7 @@ library EscrowLogic {
      *      1. Buyer explicitly confirmed, OR
      *      2. Seller delivered AND release time passed (auto-release)
      */
-    function canRelease(
-        bool buyerConfirmed,
-        bool sellerDelivered,
-        uint256 releaseTime
-    ) internal view returns (bool) {
+    function canRelease(bool buyerConfirmed, bool sellerDelivered, uint256 releaseTime) internal view returns (bool) {
         // Immediate release if buyer confirmed
         if (buyerConfirmed) return true;
 
@@ -181,10 +161,7 @@ library EscrowLogic {
      * @param releaseTime Scheduled release time
      * @return True if release time has passed and seller delivered
      */
-    function isReleaseOverdue(
-        bool sellerDelivered,
-        uint256 releaseTime
-    ) internal view returns (bool) {
+    function isReleaseOverdue(bool sellerDelivered, uint256 releaseTime) internal view returns (bool) {
         return sellerDelivered && block.timestamp >= releaseTime;
     }
 
@@ -193,9 +170,7 @@ library EscrowLogic {
      * @param releaseTime Scheduled release time
      * @return Seconds remaining (0 if already passed)
      */
-    function timeUntilRelease(
-        uint256 releaseTime
-    ) internal view returns (uint256) {
+    function timeUntilRelease(uint256 releaseTime) internal view returns (uint256) {
         if (block.timestamp >= releaseTime) return 0;
         return releaseTime - block.timestamp;
     }
@@ -213,11 +188,7 @@ library EscrowLogic {
      *
      * @dev Only buyer can cancel, and only before seller delivers
      */
-    function canCancel(
-        bool sellerDelivered,
-        address caller,
-        address buyer
-    ) internal pure returns (bool) {
+    function canCancel(bool sellerDelivered, address caller, address buyer) internal pure returns (bool) {
         return !sellerDelivered && caller == buyer;
     }
 
@@ -230,19 +201,18 @@ library EscrowLogic {
      *
      * @dev If seller already delivered, they get 10% compensation for wasted effort
      */
-    function calculateCancellationFees(
-        uint256 amount,
-        bool sellerDelivered
-    ) internal pure returns (uint256 buyerRefund, uint256 sellerCompensation) {
+    function calculateCancellationFees(uint256 amount, bool sellerDelivered)
+        internal
+        pure
+        returns (uint256 buyerRefund, uint256 sellerCompensation)
+    {
         if (!sellerDelivered) {
             // Full refund if seller hasn't started
             return (amount, 0);
         }
 
         // Seller gets 10% compensation if they already did the work
-        sellerCompensation =
-            (amount * AssetTypes.CANCELLATION_PENALTY_BPS) /
-            AssetTypes.BPS_DENOMINATOR;
+        sellerCompensation = (amount * AssetTypes.CANCELLATION_PENALTY_BPS) / AssetTypes.BPS_DENOMINATOR;
         buyerRefund = amount - sellerCompensation;
 
         return (buyerRefund, sellerCompensation);
@@ -262,12 +232,8 @@ library EscrowLogic {
      *      1. Escrow is Active or Delivered, AND
      *      2. Dispute deadline hasn't passed
      */
-    function canOpenDispute(
-        AssetTypes.EscrowState state,
-        uint256 disputeDeadline
-    ) internal view returns (bool) {
-        bool validState = (state == AssetTypes.EscrowState.Active ||
-            state == AssetTypes.EscrowState.Delivered);
+    function canOpenDispute(AssetTypes.EscrowState state, uint256 disputeDeadline) internal view returns (bool) {
+        bool validState = (state == AssetTypes.EscrowState.Active || state == AssetTypes.EscrowState.Delivered);
         bool beforeDeadline = block.timestamp <= disputeDeadline;
 
         return validState && beforeDeadline;
@@ -280,11 +246,7 @@ library EscrowLogic {
      * @param seller Seller address
      * @return True if caller is buyer or seller
      */
-    function canCallerDispute(
-        address caller,
-        address buyer,
-        address seller
-    ) internal pure returns (bool) {
+    function canCallerDispute(address caller, address buyer, address seller) internal pure returns (bool) {
         return caller == buyer || caller == seller;
     }
 
@@ -297,9 +259,7 @@ library EscrowLogic {
      * @param createdAt Creation timestamp
      * @return Age in days
      */
-    function escrowAgeInDays(
-        uint256 createdAt
-    ) internal view returns (uint256) {
+    function escrowAgeInDays(uint256 createdAt) internal view returns (uint256) {
         if (block.timestamp < createdAt) return 0;
         return (block.timestamp - createdAt) / 1 days;
     }
@@ -312,10 +272,7 @@ library EscrowLogic {
      *
      * @dev Returns 10000 (100%) if duration has elapsed
      */
-    function escrowProgress(
-        uint256 createdAt,
-        uint256 duration
-    ) internal view returns (uint256) {
+    function escrowProgress(uint256 createdAt, uint256 duration) internal view returns (uint256) {
         if (block.timestamp < createdAt) return 0;
 
         uint256 elapsed = block.timestamp - createdAt;
@@ -329,9 +286,7 @@ library EscrowLogic {
      * @param verificationDeadline Verification deadline timestamp
      * @return True if still in verification period
      */
-    function isInVerificationPeriod(
-        uint256 verificationDeadline
-    ) internal view returns (bool) {
+    function isInVerificationPeriod(uint256 verificationDeadline) internal view returns (bool) {
         return block.timestamp <= verificationDeadline;
     }
 
@@ -340,9 +295,7 @@ library EscrowLogic {
      * @param verificationDeadline Verification deadline timestamp
      * @return True if verification period ended
      */
-    function hasVerificationPeriodEnded(
-        uint256 verificationDeadline
-    ) internal view returns (bool) {
+    function hasVerificationPeriodEnded(uint256 verificationDeadline) internal view returns (bool) {
         return block.timestamp > verificationDeadline;
     }
 
@@ -359,11 +312,7 @@ library EscrowLogic {
      *
      * @dev Useful for off-chain indexing and tracking
      */
-    function generateEscrowId(
-        uint256 counter,
-        address buyer,
-        address seller
-    ) internal pure returns (bytes32) {
+    function generateEscrowId(uint256 counter, address buyer, address seller) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(counter, buyer, seller));
     }
 
@@ -372,13 +321,9 @@ library EscrowLogic {
      * @param state Current state
      * @return True if state is final (Completed, Cancelled, Refunded)
      */
-    function isTerminalState(
-        AssetTypes.EscrowState state
-    ) internal pure returns (bool) {
-        return
-            state == AssetTypes.EscrowState.Completed ||
-            state == AssetTypes.EscrowState.Cancelled ||
-            state == AssetTypes.EscrowState.Refunded;
+    function isTerminalState(AssetTypes.EscrowState state) internal pure returns (bool) {
+        return state == AssetTypes.EscrowState.Completed || state == AssetTypes.EscrowState.Cancelled
+            || state == AssetTypes.EscrowState.Refunded;
     }
 
     /**
@@ -386,12 +331,8 @@ library EscrowLogic {
      * @param state Current state
      * @return True if state is Active or Delivered
      */
-    function isActiveState(
-        AssetTypes.EscrowState state
-    ) internal pure returns (bool) {
-        return
-            state == AssetTypes.EscrowState.Active ||
-            state == AssetTypes.EscrowState.Delivered;
+    function isActiveState(AssetTypes.EscrowState state) internal pure returns (bool) {
+        return state == AssetTypes.EscrowState.Active || state == AssetTypes.EscrowState.Delivered;
     }
 
     /**
@@ -402,10 +343,7 @@ library EscrowLogic {
      *
      * @dev Basic sanity check to prevent obvious mistakes
      */
-    function isReasonableAmount(
-        uint256 amount,
-        AssetTypes.AssetType assetType
-    ) internal pure returns (bool) {
+    function isReasonableAmount(uint256 amount, AssetTypes.AssetType assetType) internal pure returns (bool) {
         // Minimum 0.001 ETH for any asset
         if (amount < 0.001 ether) return false;
 

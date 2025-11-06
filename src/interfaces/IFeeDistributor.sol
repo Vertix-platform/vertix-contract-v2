@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 /**
  * @title IFeeDistributor
@@ -45,10 +45,7 @@ interface IFeeDistributor {
     /**
      * @notice Emitted when fee collector is updated
      */
-    event FeeCollectorUpdated(
-        address indexed oldCollector,
-        address indexed newCollector
-    );
+    event FeeCollectorUpdated(address indexed oldCollector, address indexed newCollector);
 
     /**
      * @notice Emitted when fees are received by the distributor
@@ -79,18 +76,14 @@ interface IFeeDistributor {
     //             FUNCTIONS
     // ============================================
 
-    function distributeSaleProceeds(
-        address seller,
-        uint256 amount,
-        address royaltyReceiver,
-        uint256 royaltyAmount
-    ) external payable;
+    function distributeSaleProceeds(address seller, uint256 amount, address royaltyReceiver, uint256 royaltyAmount)
+        external
+        payable;
 
-    function calculateDistribution(
-        uint256 amount,
-        address nftContract,
-        uint256 tokenId
-    ) external view returns (PaymentDistribution memory);
+    function calculateDistribution(uint256 amount, address nftContract, uint256 tokenId)
+        external
+        view
+        returns (PaymentDistribution memory);
 
     function platformFeeBps() external view returns (uint256);
 

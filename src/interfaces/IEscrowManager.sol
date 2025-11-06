@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
@@ -64,11 +64,7 @@ interface IEscrowManager {
      * @param seller Seller address
      * @param deliveryTimestamp When marked delivered
      */
-    event AssetDelivered(
-        uint256 indexed escrowId,
-        address indexed seller,
-        uint256 deliveryTimestamp
-    );
+    event AssetDelivered(uint256 indexed escrowId, address indexed seller, uint256 deliveryTimestamp);
 
     /**
      * @notice Emitted when buyer confirms receipt
@@ -76,11 +72,7 @@ interface IEscrowManager {
      * @param buyer Buyer address
      * @param confirmationTimestamp When confirmed
      */
-    event AssetReceiptConfirmed(
-        uint256 indexed escrowId,
-        address indexed buyer,
-        uint256 confirmationTimestamp
-    );
+    event AssetReceiptConfirmed(uint256 indexed escrowId, address indexed buyer, uint256 confirmationTimestamp);
 
     /**
      * @notice Emitted when escrow funds are released
@@ -91,11 +83,7 @@ interface IEscrowManager {
      * @param sellerNet Net amount to seller after fees
      */
     event EscrowReleased(
-        uint256 indexed escrowId,
-        address indexed seller,
-        uint256 amount,
-        uint256 platformFee,
-        uint256 sellerNet
+        uint256 indexed escrowId, address indexed seller, uint256 amount, uint256 platformFee, uint256 sellerNet
     );
 
     /**
@@ -105,12 +93,7 @@ interface IEscrowManager {
      * @param reason Dispute reason/description
      * @param timestamp When dispute opened
      */
-    event DisputeOpened(
-        uint256 indexed escrowId,
-        address indexed disputedBy,
-        string reason,
-        uint256 timestamp
-    );
+    event DisputeOpened(uint256 indexed escrowId, address indexed disputedBy, string reason, uint256 timestamp);
 
     /**
      * @notice Emitted when a dispute is resolved
@@ -119,12 +102,7 @@ interface IEscrowManager {
      * @param amount Amount awarded
      * @param resolver Admin who resolved
      */
-    event DisputeResolved(
-        uint256 indexed escrowId,
-        address indexed winner,
-        uint256 amount,
-        address resolver
-    );
+    event DisputeResolved(uint256 indexed escrowId, address indexed winner, uint256 amount, address resolver);
 
     /**
      * @notice Emitted when escrow is cancelled
@@ -134,10 +112,7 @@ interface IEscrowManager {
      * @param sellerCompensation Compensation to seller (if applicable)
      */
     event EscrowCancelled(
-        uint256 indexed escrowId,
-        address indexed buyer,
-        uint256 refundAmount,
-        uint256 sellerCompensation
+        uint256 indexed escrowId, address indexed buyer, uint256 refundAmount, uint256 sellerCompensation
     );
 
     /**
@@ -146,11 +121,7 @@ interface IEscrowManager {
      * @param newFeeBps New fee in basis points
      * @param updatedBy Who updated the fee
      */
-    event PlatformFeeUpdated(
-        uint256 oldFeeBps,
-        uint256 newFeeBps,
-        address updatedBy
-    );
+    event PlatformFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps, address updatedBy);
 
     // ============================================
     //              ERRORS
@@ -158,10 +129,7 @@ interface IEscrowManager {
 
     error InvalidEscrowId(uint256 escrowId);
     error UnauthorizedCaller(address caller, address required);
-    error EscrowNotActive(
-        uint256 escrowId,
-        AssetTypes.EscrowState currentState
-    );
+    error EscrowNotActive(uint256 escrowId, AssetTypes.EscrowState currentState);
     error EscrowAlreadyDelivered(uint256 escrowId);
     error EscrowNotDelivered(uint256 escrowId);
     error EscrowAlreadyConfirmed(uint256 escrowId);
@@ -234,11 +202,7 @@ interface IEscrowManager {
      * @param amount Amount to award (can be partial)
      * @dev Remaining funds go to the other party
      */
-    function resolveDispute(
-        uint256 escrowId,
-        address winner,
-        uint256 amount
-    ) external;
+    function resolveDispute(uint256 escrowId, address winner, uint256 amount) external;
 
     /**
      * @notice Cancel escrow and refund buyer
@@ -264,18 +228,14 @@ interface IEscrowManager {
      * @param buyer Buyer address
      * @return Array of escrow IDs
      */
-    function getBuyerEscrows(
-        address buyer
-    ) external view returns (uint256[] memory);
+    function getBuyerEscrows(address buyer) external view returns (uint256[] memory);
 
     /**
      * @notice Get all escrows for a seller
      * @param seller Seller address
      * @return Array of escrow IDs
      */
-    function getSellerEscrows(
-        address seller
-    ) external view returns (uint256[] memory);
+    function getSellerEscrows(address seller) external view returns (uint256[] memory);
 
     /**
      * @notice Get current platform fee

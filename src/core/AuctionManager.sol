@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
@@ -79,12 +79,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @param _escrowManager Address of escrow manager contract
      * @param _platformFeeBps Initial platform fee in basis points
      */
-    constructor(
-        address _roleManager,
-        address _feeDistributor,
-        address _escrowManager,
-        uint256 _platformFeeBps
-    ) {
+    constructor(address _roleManager, address _feeDistributor, address _escrowManager, uint256 _platformFeeBps) {
         if (_roleManager == address(0)) {
             revert Errors.InvalidRoleManager();
         }
@@ -134,12 +129,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         string calldata metadataURI
     ) external whenNotPaused nonReentrant returns (uint256 auctionId) {
         // Validate parameters
-        AuctionLogic.validateAuctionParams(
-            msg.sender,
-            reservePrice,
-            duration,
-            bidIncrementBps
-        );
+        AuctionLogic.validateAuctionParams(msg.sender, reservePrice, duration, bidIncrementBps);
 
         // Validate asset type
         AssetTypes.validateAssetType(assetType);
@@ -162,12 +152,8 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
                     revert NotNFTOwner(msg.sender, owner);
                 }
 
-                bool approved = IERC721(nftContract).getApproved(tokenId) ==
-                    address(this) ||
-                    IERC721(nftContract).isApprovedForAll(
-                        msg.sender,
-                        address(this)
-                    );
+                bool approved = IERC721(nftContract).getApproved(tokenId) == address(this)
+                    || IERC721(nftContract).isApprovedForAll(msg.sender, address(this));
 
                 if (!approved) {
                     revert NFTNotApproved(nftContract, tokenId);
@@ -177,18 +163,12 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
                     revert QuantityMustBeGreaterThan0();
                 }
 
-                uint256 balance = IERC1155(nftContract).balanceOf(
-                    msg.sender,
-                    tokenId
-                );
+                uint256 balance = IERC1155(nftContract).balanceOf(msg.sender, tokenId);
                 if (balance < quantity) {
                     revert InsufficientBalance();
                 }
 
-                bool approved = IERC1155(nftContract).isApprovedForAll(
-                    msg.sender,
-                    address(this)
-                );
+                bool approved = IERC1155(nftContract).isApprovedForAll(msg.sender, address(this));
                 if (!approved) {
                     revert NFTNotApproved(nftContract, tokenId);
                 }
@@ -245,15 +225,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         sellerAuctions[msg.sender].push(auctionId);
 
         emit AuctionCreated(
-            auctionId,
-            msg.sender,
-            assetType,
-            nftContract,
-            tokenId,
-            reservePrice,
-            startTime,
-            endTime,
-            bidIncrementBps
+            auctionId, msg.sender, assetType, nftContract, tokenId, reservePrice, startTime, endTime, bidIncrementBps
         );
 
         return auctionId;
@@ -264,9 +236,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @param auctionId Auction identifier
      * @dev Bid amount is msg.value
      */
-    function placeBid(
-        uint256 auctionId
-    ) external payable whenNotPaused nonReentrant {
+    function placeBid(uint256 auctionId) external payable whenNotPaused nonReentrant {
         Auction storage auction = auctions[auctionId];
 
         // Validate auction exists and is active
@@ -300,10 +270,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         auction.highestBidder = msg.sender;
 
         // Check if auction should be extended (anti-sniping)
-        uint256 newEndTime = AuctionLogic.calculateExtendedEndTime(
-            auction.endTime,
-            block.timestamp
-        );
+        uint256 newEndTime = AuctionLogic.calculateExtendedEndTime(auction.endTime, block.timestamp);
 
         if (newEndTime != auction.endTime) {
             auction.endTime = uint32(newEndTime);
@@ -312,10 +279,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Refund previous bidder using pull-over-push pattern to prevent DoS
         if (previousBidder != address(0) && previousBid > 0) {
             // Try to refund immediately, but queue if it fails
-            (bool success, ) = previousBidder.call{
-                value: previousBid,
-                gas: 10000
-            }("");
+            (bool success,) = previousBidder.call{value: previousBid, gas: 10000}("");
 
             if (success) {
                 emit BidRefunded(auctionId, previousBidder, previousBid);
@@ -370,31 +334,17 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Check if there were any bids
         if (!AuctionLogic.hasBids(auction.highestBid, auction.highestBidder)) {
             // No bids - auction failed, NFT stays with seller
-            emit AuctionCancelled(
-                auctionId,
-                auction.seller,
-                "No bids received"
-            );
+            emit AuctionCancelled(auctionId, auction.seller, "No bids received");
             return;
         }
 
         // Check if reserve price was met
-        if (
-            !AuctionLogic.isReserveMet(auction.highestBid, auction.reservePrice)
-        ) {
+        if (!AuctionLogic.isReserveMet(auction.highestBid, auction.reservePrice)) {
             // Reserve not met - refund bidder, asset stays with seller
             _safeTransfer(auction.highestBidder, auction.highestBid);
 
-            emit AuctionFailedReserveNotMet(
-                auctionId,
-                auction.highestBid,
-                auction.reservePrice
-            );
-            emit BidRefunded(
-                auctionId,
-                auction.highestBidder,
-                auction.highestBid
-            );
+            emit AuctionFailedReserveNotMet(auctionId, auction.highestBid, auction.reservePrice);
+            emit BidRefunded(auctionId, auction.highestBidder, auction.highestBid);
             return;
         }
 
@@ -452,25 +402,15 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Must be ended but not settled
         uint256 availableAfter = auction.endTime + EMERGENCY_WITHDRAWAL_DELAY;
         if (block.timestamp < availableAfter) {
-            revert EmergencyWithdrawalTooEarly(
-                auctionId,
-                block.timestamp,
-                availableAfter
-            );
+            revert EmergencyWithdrawalTooEarly(auctionId, block.timestamp, availableAfter);
         }
 
         if (auction.settled) {
             revert EmergencyWithdrawalAlreadySettled(auctionId);
         }
 
-        if (
-            msg.sender != auction.seller && msg.sender != auction.highestBidder
-        ) {
-            revert EmergencyWithdrawalNotAuthorized(
-                msg.sender,
-                auction.seller,
-                auction.highestBidder
-            );
+        if (msg.sender != auction.seller && msg.sender != auction.highestBidder) {
+            revert EmergencyWithdrawalNotAuthorized(msg.sender, auction.seller, auction.highestBidder);
         }
 
         auction.settled = true;
@@ -478,18 +418,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Refund highest bidder if there is one
         if (auction.highestBidder != address(0) && auction.highestBid > 0) {
             _safeTransfer(auction.highestBidder, auction.highestBid);
-            emit BidRefunded(
-                auctionId,
-                auction.highestBidder,
-                auction.highestBid
-            );
+            emit BidRefunded(auctionId, auction.highestBidder, auction.highestBid);
         }
 
-        emit AuctionCancelled(
-            auctionId,
-            auction.seller,
-            "Emergency withdrawal"
-        );
+        emit AuctionCancelled(auctionId, auction.seller, "Emergency withdrawal");
     }
 
     /**
@@ -514,7 +446,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Clear pending withdrawal before transfer (checks-effects-interactions)
         pendingWithdrawals[msg.sender] = 0;
 
-        (bool success, ) = msg.sender.call{value: amount}("");
+        (bool success,) = msg.sender.call{value: amount}("");
         if (!success) {
             // Re-queue if still fails
             pendingWithdrawals[msg.sender] = amount;
@@ -578,42 +510,22 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         if (standard == AssetTypes.TokenStandard.ERC721) {
             IERC721(nftContract).safeTransferFrom(from, to, tokenId);
         } else {
-            IERC1155(nftContract).safeTransferFrom(
-                from,
-                to,
-                tokenId,
-                quantity,
-                ""
-            );
+            IERC1155(nftContract).safeTransferFrom(from, to, tokenId, quantity, "");
         }
     }
 
     /**
      * @notice Calculate and distribute payment (platform fee, royalty, seller)
      */
-    function _calculateAndDistributePayment(
-        address nftContract,
-        uint256 tokenId,
-        uint256 amount,
-        address seller
-    )
+    function _calculateAndDistributePayment(address nftContract, uint256 tokenId, uint256 amount, address seller)
         internal
-        returns (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        )
+        returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)
     {
         // Calculate platform fee
         platformFee = amount.percentOf(platformFeeBps);
 
         // Get royalty info (ERC-2981)
-        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(
-            nftContract,
-            tokenId,
-            amount
-        );
+        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(nftContract, tokenId, amount);
 
         // Calculate seller net
         sellerNet = amount - platformFee - royaltyFee;
@@ -635,18 +547,13 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Get royalty info from ERC-2981 contract
      */
-    function _getRoyaltyInfo(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    ) internal view returns (address receiver, uint256 royaltyAmount) {
-        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (
-            address _receiver,
-            uint256 _amount
-        ) {
-            uint256 maxRoyalty = salePrice.percentOf(
-                AssetTypes.MAX_ROYALTY_BPS
-            );
+    function _getRoyaltyInfo(address nftContract, uint256 tokenId, uint256 salePrice)
+        internal
+        view
+        returns (address receiver, uint256 royaltyAmount)
+    {
+        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (address _receiver, uint256 _amount) {
+            uint256 maxRoyalty = salePrice.percentOf(AssetTypes.MAX_ROYALTY_BPS);
             if (_amount > maxRoyalty) _amount = maxRoyalty;
             return (_receiver, _amount);
         } catch {
@@ -659,7 +566,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      */
     function _safeTransfer(address recipient, uint256 amount) internal {
         if (amount == 0) return;
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         if (!success) revert TransferFailed(recipient, amount);
     }
 
@@ -668,10 +575,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @param auctionId Auction identifier
      * @param auction Auction data
      */
-    function _handleNFTAuctionEnd(
-        uint256 auctionId,
-        Auction memory auction
-    ) internal {
+    function _handleNFTAuctionEnd(uint256 auctionId, Auction memory auction) internal {
         // Transfer NFT to winner
         _transferNFT(
             auction.nftContract,
@@ -683,17 +587,8 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         );
 
         // Distribute payment
-        (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        ) = _calculateAndDistributePayment(
-                auction.nftContract,
-                auction.tokenId,
-                auction.highestBid,
-                auction.seller
-            );
+        (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver) =
+            _calculateAndDistributePayment(auction.nftContract, auction.tokenId, auction.highestBid, auction.seller);
 
         emit AuctionEnded(
             auctionId,
@@ -712,14 +607,9 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @param auctionId Auction identifier
      * @param auction Auction data
      */
-    function _handleOffChainAuctionEnd(
-        uint256 auctionId,
-        Auction memory auction
-    ) internal {
+    function _handleOffChainAuctionEnd(uint256 auctionId, Auction memory auction) internal {
         // Get recommended escrow duration for asset type
-        uint256 escrowDuration = AssetTypes.recommendedEscrowDuration(
-            auction.assetType
-        );
+        uint256 escrowDuration = AssetTypes.recommendedEscrowDuration(auction.assetType);
 
         // Create escrow with winner as buyer, seller remains seller
         // Winner's funds (highest bid) are transferred to escrow
@@ -751,10 +641,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Check if bidder is already tracked for this auction
      */
-    function _isBidderTracked(
-        address bidder,
-        uint256 auctionId
-    ) internal view returns (bool) {
+    function _isBidderTracked(address bidder, uint256 auctionId) internal view returns (bool) {
         uint256[] memory bids = bidderAuctions[bidder];
         for (uint256 i = 0; i < bids.length; i++) {
             if (bids[i] == auctionId) return true;
@@ -778,9 +665,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Get auction details
      */
-    function getAuction(
-        uint256 auctionId
-    ) external view returns (Auction memory) {
+    function getAuction(uint256 auctionId) external view returns (Auction memory) {
         _validateAuctionExists(auctionId);
         return auctions[auctionId];
     }
@@ -797,11 +682,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
             return auction.reservePrice;
         }
 
-        return
-            AuctionLogic.calculateMinimumBid(
-                auction.highestBid,
-                auction.bidIncrementBps
-            );
+        return AuctionLogic.calculateMinimumBid(auction.highestBid, auction.bidIncrementBps);
     }
 
     /**
@@ -811,9 +692,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         if (auctionId == 0 || auctionId > auctionCounter) return false;
 
         Auction memory auction = auctions[auctionId];
-        return
-            auction.active &&
-            AuctionLogic.isActive(auction.startTime, auction.endTime);
+        return auction.active && AuctionLogic.isActive(auction.startTime, auction.endTime);
     }
 
     /**
@@ -829,18 +708,14 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Get auctions created by seller
      */
-    function getSellerAuctions(
-        address seller
-    ) external view returns (uint256[] memory) {
+    function getSellerAuctions(address seller) external view returns (uint256[] memory) {
         return sellerAuctions[seller];
     }
 
     /**
      * @notice Get auctions where address is highest bidder
      */
-    function getBidderAuctions(
-        address bidder
-    ) external view returns (uint256[] memory) {
+    function getBidderAuctions(address bidder) external view returns (uint256[] memory) {
         return bidderAuctions[bidder];
     }
 
@@ -853,10 +728,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @return actualHash Computed hash from provided details
      * @dev Useful for buyers to verify asset authenticity before/after auction
      */
-    function verifyAssetHash(
-        uint256 auctionId,
-        string calldata assetDetails
-    )
+    function verifyAssetHash(uint256 auctionId, string calldata assetDetails)
         external
         view
         returns (bool isValid, bytes32 expectedHash, bytes32 actualHash)
@@ -872,17 +744,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
     /**
      * @notice Calculate payment distribution for an auction
      */
-    function calculatePaymentDistribution(
-        uint256 auctionId
-    )
+    function calculatePaymentDistribution(uint256 auctionId)
         external
         view
-        returns (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        )
+        returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)
     {
         _validateAuctionExists(auctionId);
         Auction memory auction = auctions[auctionId];
@@ -890,11 +755,7 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         uint256 amount = auction.highestBid;
         platformFee = amount.percentOf(platformFeeBps);
 
-        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(
-            auction.nftContract,
-            auction.tokenId,
-            amount
-        );
+        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(auction.nftContract, auction.tokenId, amount);
 
         sellerNet = amount - platformFee - royaltyFee;
 
