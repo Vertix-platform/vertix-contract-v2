@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import "./Errors.sol";
 
@@ -30,6 +30,7 @@ library AssetTypes {
         MobileApp, // Mobile application
         GameAccount, // Gaming account
         Other // Other digital assets
+
     }
 
     /**
@@ -43,6 +44,7 @@ library AssetTypes {
         Disputed, // Dispute opened, escrow frozen
         Cancelled, // Cancelled before delivery, refunded
         Refunded // Dispute resolved in favor of buyer
+
     }
 
     /**
@@ -54,6 +56,7 @@ library AssetTypes {
         Sold, // Successfully sold
         Cancelled, // Cancelled by seller
         Expired // Listing expired (if time-limited)
+
     }
 
     /**
@@ -63,6 +66,7 @@ library AssetTypes {
         FixedPrice, // Standard fixed-price listing
         Auction, // English auction (ascending bid)
         OfferOnly // Only accepts offers (no fixed price)
+
     }
 
     /**
@@ -71,6 +75,7 @@ library AssetTypes {
     enum TokenStandard {
         ERC721, // Non-fungible token standard
         ERC1155 // Multi-token standard
+
     }
 
     /**
@@ -82,6 +87,7 @@ library AssetTypes {
         UnderReview, // Admin reviewing evidence
         Resolved, // Dispute resolved by admin
         Appealed // Decision appealed (future feature)
+
     }
 
     // ============================================
@@ -171,12 +177,8 @@ library AssetTypes {
      * @param assetType The asset type to check
      * @return True if social media platform
      */
-    function isSocialMediaType(
-        AssetType assetType
-    ) internal pure returns (bool) {
-        return
-            assetType >= AssetType.SocialMediaYouTube &&
-            assetType <= AssetType.SocialMediaTikTok;
+    function isSocialMediaType(AssetType assetType) internal pure returns (bool) {
+        return assetType >= AssetType.SocialMediaYouTube && assetType <= AssetType.SocialMediaTikTok;
     }
 
     /**
@@ -194,9 +196,7 @@ library AssetTypes {
      * @param assetType The asset type
      * @return Recommended duration in seconds
      */
-    function recommendedEscrowDuration(
-        AssetType assetType
-    ) internal pure returns (uint256) {
+    function recommendedEscrowDuration(AssetType assetType) internal pure returns (uint256) {
         if (isNFTType(assetType)) return 0; // No escrow for NFTs
         if (isSocialMediaType(assetType)) return MEDIUM_ESCROW; // 30 days for social media
         if (assetType == AssetType.Domain) return SHORT_ESCROW; // 7 days for domains
@@ -222,10 +222,7 @@ library AssetTypes {
      * @param to New state
      * @return True if transition is valid
      */
-    function isValidStateTransition(
-        EscrowState from,
-        EscrowState to
-    ) internal pure returns (bool) {
+    function isValidStateTransition(EscrowState from, EscrowState to) internal pure returns (bool) {
         // None -> Active (creation)
         if (from == EscrowState.None && to == EscrowState.Active) return true;
 
@@ -272,12 +269,8 @@ library AssetTypes {
      * @param duration Auction duration in seconds
      * @return True if valid
      */
-    function isValidAuctionDuration(
-        uint256 duration
-    ) internal pure returns (bool) {
-        return
-            duration >= MIN_AUCTION_DURATION &&
-            duration <= MAX_AUCTION_DURATION;
+    function isValidAuctionDuration(uint256 duration) internal pure returns (bool) {
+        return duration >= MIN_AUCTION_DURATION && duration <= MAX_AUCTION_DURATION;
     }
 
     /**
@@ -285,12 +278,8 @@ library AssetTypes {
      * @param incrementBps Bid increment in basis points
      * @return True if valid
      */
-    function isValidBidIncrement(
-        uint256 incrementBps
-    ) internal pure returns (bool) {
-        return
-            incrementBps >= MIN_BID_INCREMENT_BPS &&
-            incrementBps <= MAX_BID_INCREMENT_BPS;
+    function isValidBidIncrement(uint256 incrementBps) internal pure returns (bool) {
+        return incrementBps >= MIN_BID_INCREMENT_BPS && incrementBps <= MAX_BID_INCREMENT_BPS;
     }
 
     /**
@@ -298,22 +287,17 @@ library AssetTypes {
      * @param duration Offer duration in seconds
      * @return True if valid
      */
-    function isValidOfferDuration(
-        uint256 duration
-    ) internal pure returns (bool) {
+    function isValidOfferDuration(uint256 duration) internal pure returns (bool) {
         return duration >= MIN_OFFER_DURATION && duration <= MAX_OFFER_DURATION;
     }
 
     /**
-     * @notice Check if auction should be extended
+     * @notice Check if auction should be extended (anti-sniping)
      * @param endTime Current auction end time
      * @param bidTime Time of the bid
      * @return True if auction should be extended
      */
-    function shouldExtendAuction(
-        uint256 endTime,
-        uint256 bidTime
-    ) internal pure returns (bool) {
+    function shouldExtendAuction(uint256 endTime, uint256 bidTime) internal pure returns (bool) {
         if (bidTime >= endTime) return false; // Already ended
         return (endTime - bidTime) <= AUCTION_EXTENSION_THRESHOLD;
     }
@@ -324,10 +308,7 @@ library AssetTypes {
      * @param incrementBps Bid increment in basis points
      * @return Minimum next bid amount
      */
-    function calculateMinimumBid(
-        uint256 currentBid,
-        uint256 incrementBps
-    ) internal pure returns (uint256) {
+    function calculateMinimumBid(uint256 currentBid, uint256 incrementBps) internal pure returns (uint256) {
         if (currentBid == 0) return 0;
         uint256 increment = (currentBid * incrementBps) / BPS_DENOMINATOR;
         return currentBid + increment;

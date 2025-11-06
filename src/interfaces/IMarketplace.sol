@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
@@ -27,23 +27,26 @@ interface IMarketplace {
         string metadataURI;
     }
 
+    /**
+     * @notice NFT-specific data
+     * @dev Only populated for NFT listings
+     */
+    struct NFTDetails {
+        address nftContract;
+        uint64 tokenId;
+        uint16 quantity;
+        AssetTypes.TokenStandard standard;
+    }
+
     // ============================================
     //                EVENTS
     // ============================================
 
     event ListingCreated(
-        uint256 indexed listingId,
-        address indexed seller,
-        AssetTypes.AssetType assetType,
-        uint256 price
+        uint256 indexed listingId, address indexed seller, AssetTypes.AssetType assetType, uint256 price
     );
 
-    event ListingSold(
-        uint256 indexed listingId,
-        address indexed buyer,
-        address indexed seller,
-        uint256 price
-    );
+    event ListingSold(uint256 indexed listingId, address indexed buyer, address indexed seller, uint256 price);
 
     event ListingCancelled(uint256 indexed listingId, address indexed seller);
 
@@ -92,8 +95,21 @@ interface IMarketplace {
     // ============================================
 
     function getListing(uint256 listingId) external view returns (Listing memory);
-    
+
     function getSellerListings(address seller) external view returns (uint256[] memory);
-    
+
     function isNFTListing(uint256 listingId) external view returns (bool);
+
+    /**
+     * @notice Get NFT details for a listing
+     * @param listingId Listing identifier
+     * @return NFT details
+     */
+    function getNFTDetails(uint256 listingId) external view returns (NFTDetails memory);
+
+    /**
+     * @notice Mark listing as sold (called by OfferManager/AuctionManager)
+     * @param listingId Listing identifier
+     */
+    function markListingAsSold(uint256 listingId) external;
 }

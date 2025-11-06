@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155BurnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/common/ERC2981Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/Errors.sol";
+import {ERC1155Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
+import {ERC1155BurnableUpgradeable} from
+    "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155BurnableUpgradeable.sol";
+import {ERC1155SupplyUpgradeable} from
+    "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/ERC1155SupplyUpgradeable.sol";
+import {ERC2981Upgradeable} from "@openzeppelin/contracts-upgradeable/token/common/ERC2981Upgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 /**
  * @title VertixNFT1155
@@ -26,7 +28,7 @@ contract VertixNFT1155 is
     PausableUpgradeable
 {
     // ============================================
-    // STATE VARIABLES
+    //       STATE VARIABLES
     // ============================================
 
     string public name;
@@ -36,8 +38,15 @@ contract VertixNFT1155 is
     mapping(uint256 => string) public tokenURIs;
     mapping(uint256 => uint256) public tokenMaxSupply;
 
+    /**
+     * @dev Gap for future storage variables to prevent storage collisions
+     * This allows adding new state variables in future upgrades without breaking storage layout
+     * 50 slots reserved (current usage: 3 slots + 2 mappings above)
+     */
+    uint256[47] private __gap;
+
     // ============================================
-    // CONSTRUCTOR & INITIALIZER
+    //         CONSTRUCTOR & INITIALIZER
     // ============================================
 
     /**
@@ -81,12 +90,12 @@ contract VertixNFT1155 is
     //            MINTING
     // ============================================
 
-    function create(
-        uint256 initialSupply,
-        string memory tokenURI,
-        uint256 maxSupply_
-    ) external onlyOwner returns (uint256 tokenId) {
-        tokenId = _tokenIdCounter++;
+    function create(uint256 initialSupply, string memory tokenURI, uint256 maxSupply_)
+        external
+        onlyOwner
+        returns (uint256 tokenId)
+    {
+        tokenId = ++_tokenIdCounter;
 
         tokenURIs[tokenId] = tokenURI;
         tokenMaxSupply[tokenId] = maxSupply_;
@@ -98,13 +107,10 @@ contract VertixNFT1155 is
         return tokenId;
     }
 
-    function mint(
-        address to,
-        uint256 tokenId,
-        uint256 amount
-    ) external onlyOwner whenNotPaused {
-        if (tokenId >= _tokenIdCounter)
+    function mint(address to, uint256 tokenId, uint256 amount) external onlyOwner whenNotPaused {
+        if (tokenId >= _tokenIdCounter) {
             revert Errors.TokenDoesNotExist(tokenId);
+        }
 
         uint256 maxSupply_ = tokenMaxSupply[tokenId];
         if (maxSupply_ > 0) {
@@ -117,20 +123,12 @@ contract VertixNFT1155 is
         _mint(to, tokenId, amount, "");
     }
 
-    function mintBatch(
-        address to,
-        uint256[] memory tokenIds,
-        uint256[] memory amounts
-    ) external onlyOwner whenNotPaused {
+    function mintBatch(address to, uint256[] memory tokenIds, uint256[] memory amounts)
+        external
+        onlyOwner
+        whenNotPaused
+    {
         _mintBatch(to, tokenIds, amounts, "");
-    }
-
-    // ============================================
-    //            URI
-    // ============================================
-
-    function uri(uint256 tokenId) public view override returns (string memory) {
-        return tokenURIs[tokenId];
     }
 
     function setURI(uint256 tokenId, string memory newuri) external onlyOwner {
@@ -138,24 +136,17 @@ contract VertixNFT1155 is
     }
 
     // ============================================
-    // ROYALTY
+    //             ROYALTY
     // ============================================
 
-    function setDefaultRoyalty(
-        address receiver,
-        uint96 feeBps
-    ) external onlyOwner {
+    function setDefaultRoyalty(address receiver, uint96 feeBps) external onlyOwner {
         if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
             revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
         }
         _setDefaultRoyalty(receiver, feeBps);
     }
 
-    function setTokenRoyalty(
-        uint256 tokenId,
-        address receiver,
-        uint96 feeBps
-    ) external onlyOwner {
+    function setTokenRoyalty(uint256 tokenId, address receiver, uint96 feeBps) external onlyOwner {
         if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
             revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
         }
@@ -163,7 +154,7 @@ contract VertixNFT1155 is
     }
 
     // ============================================
-    // ADMIN
+    //              ADMIN
     // ============================================
 
     function pause() external onlyOwner {
@@ -175,15 +166,10 @@ contract VertixNFT1155 is
     }
 
     // ============================================
-    // OVERRIDES
+    //             OVERRIDES
     // ============================================
 
-    function _update(
-        address from,
-        address to,
-        uint256[] memory ids,
-        uint256[] memory values
-    )
+    function _update(address from, address to, uint256[] memory ids, uint256[] memory values)
         internal
         override(ERC1155Upgradeable, ERC1155SupplyUpgradeable)
         whenNotPaused
@@ -191,14 +177,16 @@ contract VertixNFT1155 is
         super._update(from, to, ids, values);
     }
 
-    function supportsInterface(
-        bytes4 interfaceId
-    )
+    function supportsInterface(bytes4 interfaceId)
         public
         view
         override(ERC1155Upgradeable, ERC2981Upgradeable)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
+    }
+
+    function uri(uint256 tokenId) public view override returns (string memory) {
+        return tokenURIs[tokenId];
     }
 }

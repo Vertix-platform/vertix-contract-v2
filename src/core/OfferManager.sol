@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../interfaces/IOfferManager.sol";
-import "../interfaces/IMarketplace.sol";
-import "../interfaces/IEscrowManager.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/PercentageMath.sol";
-import "../libraries/Errors.sol";
-import "../core/FeeDistributor.sol";
-import "../access/RoleManager.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {IOfferManager} from "../interfaces/IOfferManager.sol";
+import {IMarketplace} from "../interfaces/IMarketplace.sol";
+import {IEscrowManager} from "../interfaces/IEscrowManager.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {PercentageMath} from "../libraries/PercentageMath.sol";
+import {Errors} from "../libraries/Errors.sol";
+import {FeeDistributor} from "../core/FeeDistributor.sol";
+import {RoleManager} from "../access/RoleManager.sol";
 
 /**
  * @title OfferManager
@@ -24,17 +24,16 @@ import "../access/RoleManager.sol";
  * - Multiple simultaneous offers per listing
  * - Time-limited offers with expiration
  * - Seller can accept/reject offers
- * - Offeran cancel active offers
+ * - Buyer can cancel active offers
  * - Automatic routing: NFT = instant transfer, others = escrow creation
  * - Locked funds when offer made (ensures buyer has funds)
- *
  */
 contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     using PercentageMath for uint256;
     using AssetTypes for AssetTypes.AssetType;
 
     // ============================================
-    // STATE VARIABLES
+    //          STATE VARIABLES
     // ============================================
 
     /// @notice Offer counter for unique IDs
@@ -43,17 +42,26 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     /// @notice Platform fee in basis points
     uint256 public platformFeeBps;
 
+    /// @notice Maximum number of offers that can be cancelled in a single batch
+    uint256 public constant MAX_BATCH_CANCEL_SIZE = 50;
+
+    /// @notice Minimum offer amount to prevent spam (0.001 ETH)
+    uint256 public constant MIN_OFFER_AMOUNT = 0.001 ether;
+
     /// @notice Mapping from offer ID to offer data
     mapping(uint256 => Offer) public offers;
 
     /// @notice Mapping listingId => array of offer IDs
     mapping(uint256 => uint256[]) public listingOffers;
 
-    /// @notice Mapping offeror => array of offer IDs
-    mapping(address => uint256[]) public offerorOffers;
+    /// @notice Mapping buyer => array of offer IDs
+    mapping(address => uint256[]) public buyerOffers;
 
     /// @notice Mapping seller => array of offer IDs
     mapping(address => uint256[]) public sellerOffers;
+
+    /// @notice Pending refunds for rejected/cancelled offers (pull-over-push pattern)
+    mapping(address => uint256) public pendingRefunds;
 
     /// @notice References to external contracts
     RoleManager public immutable roleManager;
@@ -62,7 +70,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     IEscrowManager public immutable escrowManager;
 
     // ============================================
-    // CONSTRUCTOR
+    //           CONSTRUCTOR
     // ============================================
 
     /**
@@ -81,8 +89,9 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         uint256 _platformFeeBps
     ) {
         if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
-        if (_feeDistributor == address(0))
+        if (_feeDistributor == address(0)) {
             revert Errors.InvalidFeeDistributor();
+        }
         if (_marketplace == address(0)) revert Errors.InvalidMarketplace();
         if (_escrowManager == address(0)) revert Errors.InvalidEscrowManager();
 
@@ -106,16 +115,15 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
      * @return offerId Unique offer identifier
      * @dev Offer amount is msg.value, funds are locked in contract
      */
-    function makeOffer(
-        uint256 listingId,
-        uint256 duration
-    ) external payable whenNotPaused nonReentrant returns (uint256 offerId) {
-        // Validate offer amount
-        if (msg.value == 0) {
-            revert InvalidOfferAmount(msg.value);
-        }
-
-        if (msg.value > AssetTypes.MAX_LISTING_PRICE) {
+    function makeOffer(uint256 listingId, uint256 duration)
+        external
+        payable
+        whenNotPaused
+        nonReentrant
+        returns (uint256 offerId)
+    {
+        // Validate offer amount (minimum to prevent spam, maximum for safety)
+        if (msg.value < MIN_OFFER_AMOUNT || msg.value > AssetTypes.MAX_LISTING_PRICE) {
             revert InvalidOfferAmount(msg.value);
         }
 
@@ -150,7 +158,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
 
         // Create offer (storage optimized)
         offers[offerId] = Offer({
-            offeror: msg.sender,
+            buyer: msg.sender,
             amount: uint96(msg.value),
             seller: listing.seller,
             createdAt: uint32(block.timestamp),
@@ -163,13 +171,13 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
 
         // Track offers
         listingOffers[listingId].push(offerId);
-        offerorOffers[msg.sender].push(offerId);
+        buyerOffers[msg.sender].push(offerId);
         sellerOffers[listing.seller].push(offerId);
 
         emit OfferMade(
             offerId,
             listingId,
-            msg.sender,
+            msg.sender, // buyer
             listing.seller,
             msg.value,
             expiresAt,
@@ -209,13 +217,28 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         }
 
         // Get listing details
-        IMarketplace.Listing memory listing = marketplace.getListing(
-            offer.listingId
-        );
+        IMarketplace.Listing memory listing = marketplace.getListing(offer.listingId);
 
         // Validate listing is still active
         if (listing.status != AssetTypes.ListingStatus.Active) {
             revert ListingAlreadySold(offer.listingId);
+        }
+
+        // For NFT offers, verify seller has approved this contract
+        if (AssetTypes.isNFTType(offer.assetType)) {
+            IMarketplace.NFTDetails memory nft = marketplace.getNFTDetails(offer.listingId);
+
+            if (nft.standard == AssetTypes.TokenStandard.ERC721) {
+                address approved = IERC721(nft.nftContract).getApproved(nft.tokenId);
+                bool isApprovedForAll = IERC721(nft.nftContract).isApprovedForAll(msg.sender, address(this));
+                if (approved != address(this) && !isApprovedForAll) {
+                    revert NFTNotApproved(nft.nftContract, nft.tokenId);
+                }
+            } else {
+                if (!IERC1155(nft.nftContract).isApprovedForAll(msg.sender, address(this))) {
+                    revert NFTNotApproved(nft.nftContract, nft.tokenId);
+                }
+            }
         }
 
         // Mark offer as accepted
@@ -231,28 +254,20 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
             _handleOffChainOfferAcceptance(offer, listing);
         }
 
-        // Cancel all other offers for this listing
-        _cancelOtherListingOffers(offer.listingId, offerId);
+        // Note: Other offers for this listing are automatically invalidated
+        // because the listing status changed to Sold. Users can claim refunds
+        // via claimRefundForInvalidOffer()
 
-        emit OfferAccepted(
-            offerId,
-            offer.listingId,
-            msg.sender,
-            offer.offeror,
-            offer.amount
-        );
+        emit OfferAccepted(offerId, offer.listingId, msg.sender, offer.buyer, offer.amount);
     }
 
     /**
      * @notice Reject an offer (seller only)
      * @param offerId Offer identifier
      * @param reason Reason for rejection
-     * @dev Refunds offeror immediately
+     * @dev Refunds buyer immediately
      */
-    function rejectOffer(
-        uint256 offerId,
-        string calldata reason
-    ) external nonReentrant {
+    function rejectOffer(uint256 offerId, string calldata reason) external whenNotPaused nonReentrant {
         Offer storage offer = offers[offerId];
 
         // Validate
@@ -270,26 +285,20 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         // Mark as inactive
         offer.active = false;
 
-        // Refund offeror
+        // Refund buyer
         uint256 refundAmount = offer.amount;
-        _safeTransfer(offer.offeror, refundAmount);
+        _safeTransfer(offer.buyer, refundAmount);
 
-        emit OfferRejected(
-            offerId,
-            offer.listingId,
-            msg.sender,
-            offer.offeror,
-            reason
-        );
-        emit OfferRefunded(offerId, offer.offeror, refundAmount);
+        emit OfferRejected(offerId, offer.listingId, msg.sender, offer.buyer, reason);
+        emit OfferRefunded(offerId, offer.buyer, refundAmount);
     }
 
     /**
-     * @notice Cancel an offer (offeror only)
+     * @notice Cancel an offer (buyer only)
      * @param offerId Offer identifier
      * @dev Can only cancel active, non-accepted offers
      */
-    function cancelOffer(uint256 offerId) external nonReentrant {
+    function cancelOffer(uint256 offerId) external whenNotPaused nonReentrant {
         Offer storage offer = offers[offerId];
 
         // Validate
@@ -299,20 +308,20 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
             revert OfferNotActive(offerId);
         }
 
-        // Only offeror can cancel
-        if (msg.sender != offer.offeror) {
-            revert UnauthorizedOfferor(msg.sender, offer.offeror);
+        // Only buyer can cancel
+        if (msg.sender != offer.buyer) {
+            revert UnauthorizedBuyer(msg.sender, offer.buyer);
         }
 
         // Mark as inactive
         offer.active = false;
 
-        // Refund offeror
+        // Refund buyer
         uint256 refundAmount = offer.amount;
-        _safeTransfer(offer.offeror, refundAmount);
+        _safeTransfer(offer.buyer, refundAmount);
 
         emit OfferCancelled(offerId, offer.listingId, msg.sender, refundAmount);
-        emit OfferRefunded(offerId, offer.offeror, refundAmount);
+        emit OfferRefunded(offerId, offer.buyer, refundAmount);
     }
 
     /**
@@ -320,7 +329,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
      * @param offerId Offer identifier
      * @dev Anyone can call to clean up expired offers
      */
-    function claimExpiredOffer(uint256 offerId) external nonReentrant {
+    function claimExpiredOffer(uint256 offerId) external whenNotPaused nonReentrant {
         Offer storage offer = offers[offerId];
 
         // Validate
@@ -338,50 +347,43 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         // Mark as inactive
         offer.active = false;
 
-        // Refund offeror
+        // Refund buyer
         uint256 refundAmount = offer.amount;
-        _safeTransfer(offer.offeror, refundAmount);
+        _safeTransfer(offer.buyer, refundAmount);
 
-        emit OfferExpired(offerId, offer.listingId, offer.offeror);
-        emit OfferRefunded(offerId, offer.offeror, refundAmount);
+        emit OfferExpired(offerId, offer.listingId, offer.buyer);
+        emit OfferRefunded(offerId, offer.buyer, refundAmount);
     }
 
     /**
      * @notice Batch cancel multiple offers
      * @param offerIds Array of offer identifiers
-     * @dev Useful for offeror to cancel multiple offers at once
+     * @dev Useful for buyer to cancel multiple offers at once
      */
-    function batchCancelOffers(
-        uint256[] calldata offerIds
-    ) external nonReentrant {
+    function batchCancelOffers(uint256[] calldata offerIds) external nonReentrant {
+        // Validate batch size to prevent gas limit issues
+        if (offerIds.length > MAX_BATCH_CANCEL_SIZE) {
+            revert BatchSizeTooLarge(offerIds.length, MAX_BATCH_CANCEL_SIZE);
+        }
+
         for (uint256 i = 0; i < offerIds.length; i++) {
             uint256 offerId = offerIds[i];
             Offer storage offer = offers[offerId];
 
             // Skip if invalid or already inactive
-            if (
-                offerId == 0 ||
-                offerId > offerCounter ||
-                !offer.active ||
-                msg.sender != offer.offeror
-            ) {
+            if (offerId == 0 || offerId > offerCounter || !offer.active || msg.sender != offer.buyer) {
                 continue;
             }
 
             // Mark as inactive
             offer.active = false;
 
-            // Refund offeror
+            // Refund buyer
             uint256 refundAmount = offer.amount;
-            _safeTransfer(offer.offeror, refundAmount);
+            _safeTransfer(offer.buyer, refundAmount);
 
-            emit OfferCancelled(
-                offerId,
-                offer.listingId,
-                msg.sender,
-                refundAmount
-            );
-            emit OfferRefunded(offerId, offer.offeror, refundAmount);
+            emit OfferCancelled(offerId, offer.listingId, msg.sender, refundAmount);
+            emit OfferRefunded(offerId, offer.buyer, refundAmount);
         }
     }
 
@@ -392,13 +394,19 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     /**
      * @notice Handle NFT offer acceptance (instant transfer)
      */
-    function _handleNFTOfferAcceptance(
-        Offer memory offer,
-        IMarketplace.Listing memory /* listing */
-    ) internal {
-        // For NFTs, we need to coordinate with NFT marketplace
-        // This is a simplified version - in production, you'd want tighter integration
+    function _handleNFTOfferAcceptance(Offer memory offer, IMarketplace.Listing memory /* listing */ ) internal {
+        // Get NFT details from marketplace
+        IMarketplace.NFTDetails memory nft = marketplace.getNFTDetails(offer.listingId);
 
+        // Transfer NFT from seller to buyer
+        if (nft.standard == AssetTypes.TokenStandard.ERC721) {
+            IERC721(nft.nftContract).safeTransferFrom(offer.seller, offer.buyer, nft.tokenId);
+        } else {
+            // ERC1155
+            IERC1155(nft.nftContract).safeTransferFrom(offer.seller, offer.buyer, nft.tokenId, nft.quantity, "");
+        }
+
+        // Calculate and distribute payment
         uint256 amount = offer.amount;
 
         // Calculate platform fee
@@ -411,25 +419,20 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         // Transfer seller net
         _safeTransfer(offer.seller, sellerNet);
 
-        // Note: NFT transfer would need to be coordinated externally
-        // or this contract needs NFT approval from seller
+        // Mark listing as sold in marketplace
+        marketplace.markListingAsSold(offer.listingId);
     }
 
     /**
      * @notice Handle off-chain asset offer acceptance (create escrow)
      */
-    function _handleOffChainOfferAcceptance(
-        Offer memory offer,
-        IMarketplace.Listing memory listing
-    ) internal {
+    function _handleOffChainOfferAcceptance(Offer memory offer, IMarketplace.Listing memory listing) internal {
         // Get recommended escrow duration for asset type
-        uint256 escrowDuration = AssetTypes.recommendedEscrowDuration(
-            offer.assetType
-        );
+        uint256 escrowDuration = AssetTypes.recommendedEscrowDuration(offer.assetType);
 
         // Create escrow with offer amount
         escrowManager.createEscrow{value: offer.amount}(
-            offer.offeror, // buyer (the person who made the offer)
+            offer.buyer, // buyer (the person who made the offer)
             offer.seller, // seller
             offer.assetType, // assetType
             escrowDuration, // duration
@@ -438,38 +441,46 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         );
 
         // Escrow created successfully
-        // Buyer (offeror) is now the escrow buyer
+        // Buyer is now the escrow buyer
         // Seller must deliver and complete escrow process
     }
 
     /**
-     * @notice Cancel all other offers for a listing when one is accepted
+     * @notice Claim refund for offer on sold/cancelled listing
+     * @param offerId Offer identifier
+     * @dev Allows buyers to claim refunds when their offer becomes invalid
      */
-    function _cancelOtherListingOffers(
-        uint256 listingId,
-        uint256 acceptedOfferId
-    ) internal {
-        uint256[] memory offerIds = listingOffers[listingId];
+    function claimRefundForInvalidOffer(uint256 offerId) external nonReentrant {
+        Offer storage offer = offers[offerId];
 
-        for (uint256 i = 0; i < offerIds.length; i++) {
-            uint256 offerId = offerIds[i];
+        // Validate
+        _validateOfferExists(offerId);
 
-            // Skip the accepted offer
-            if (offerId == acceptedOfferId) continue;
+        if (!offer.active) {
+            revert OfferNotActive(offerId);
+        }
 
-            Offer storage offer = offers[offerId];
+        // Only the buyer can claim
+        if (msg.sender != offer.buyer) {
+            revert UnauthorizedBuyer(msg.sender, offer.buyer);
+        }
 
-            // Skip if already inactive
-            if (!offer.active) continue;
+        // Get listing to check if it's still active
+        IMarketplace.Listing memory listing = marketplace.getListing(offer.listingId);
 
+        // Offer is invalid if listing is no longer active
+        if (listing.status != AssetTypes.ListingStatus.Active) {
             // Mark as inactive
             offer.active = false;
 
-            // Refund offeror
-            _safeTransfer(offer.offeror, offer.amount);
+            // Refund buyer
+            uint256 refundAmount = offer.amount;
+            _safeTransfer(offer.buyer, refundAmount);
 
-            emit OfferCancelled(offerId, listingId, offer.seller, offer.amount);
-            emit OfferRefunded(offerId, offer.offeror, offer.amount);
+            emit OfferCancelled(offerId, offer.listingId, msg.sender, refundAmount);
+            emit OfferRefunded(offerId, offer.buyer, refundAmount);
+        } else {
+            revert OfferNotActive(offerId);
         }
     }
 
@@ -478,7 +489,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
      */
     function _safeTransfer(address recipient, uint256 amount) internal {
         if (amount == 0) return;
-        (bool success, ) = recipient.call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         if (!success) revert TransferFailed(recipient, amount);
     }
 
@@ -492,7 +503,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     }
 
     // ============================================
-    // VIEW FUNCTIONS
+    //             VIEW FUNCTIONS
     // ============================================
 
     /**
@@ -506,57 +517,21 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     /**
      * @notice Get all offers for a listing
      */
-    function getListingOffers(
-        uint256 listingId
-    ) external view returns (uint256[] memory) {
+    function getListingOffers(uint256 listingId) external view returns (uint256[] memory) {
         return listingOffers[listingId];
-    }
-
-    /**
-     * @notice Get active offers for a listing
-     */
-    function getActiveListingOffers(
-        uint256 listingId
-    ) external view returns (uint256[] memory) {
-        uint256[] memory allOffers = listingOffers[listingId];
-        uint256 activeCount = 0;
-
-        // Count active offers
-        for (uint256 i = 0; i < allOffers.length; i++) {
-            if (_isOfferActiveInternal(allOffers[i])) {
-                activeCount++;
-            }
-        }
-
-        // Build active offers array
-        uint256[] memory activeOffers = new uint256[](activeCount);
-        uint256 index = 0;
-
-        for (uint256 i = 0; i < allOffers.length; i++) {
-            if (_isOfferActiveInternal(allOffers[i])) {
-                activeOffers[index] = allOffers[i];
-                index++;
-            }
-        }
-
-        return activeOffers;
     }
 
     /**
      * @notice Get offers made by an address
      */
-    function getOfferorOffers(
-        address offeror
-    ) external view returns (uint256[] memory) {
-        return offerorOffers[offeror];
+    function getBuyerOffers(address buyer) external view returns (uint256[] memory) {
+        return buyerOffers[buyer];
     }
 
     /**
      * @notice Get offers received by a seller
      */
-    function getSellerOffers(
-        address seller
-    ) external view returns (uint256[] memory) {
+    function getSellerOffers(address seller) external view returns (uint256[] memory) {
         return sellerOffers[seller];
     }
 
@@ -570,9 +545,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     /**
      * @notice Internal check if offer is active
      */
-    function _isOfferActiveInternal(
-        uint256 offerId
-    ) internal view returns (bool) {
+    function _isOfferActiveInternal(uint256 offerId) internal view returns (bool) {
         if (offerId == 0 || offerId > offerCounter) return false;
 
         Offer memory offer = offers[offerId];
@@ -602,6 +575,35 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         }
         PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
         platformFeeBps = newFeeBps;
+    }
+
+    /**
+     * @notice Get active offers for a listing
+     * @param listingId Listing identifier
+     * @return Array of active offer IDs
+     */
+    function getActiveListingOffers(uint256 listingId) external view returns (uint256[] memory) {
+        uint256[] memory allOffers = listingOffers[listingId];
+
+        // First pass: count active offers
+        uint256 activeCount = 0;
+        for (uint256 i = 0; i < allOffers.length; i++) {
+            if (offers[allOffers[i]].active) {
+                activeCount++;
+            }
+        }
+
+        // Second pass: populate active offers array
+        uint256[] memory activeOffers = new uint256[](activeCount);
+        uint256 index = 0;
+        for (uint256 i = 0; i < allOffers.length; i++) {
+            if (offers[allOffers[i]].active) {
+                activeOffers[index] = allOffers[i];
+                index++;
+            }
+        }
+
+        return activeOffers;
     }
 
     /**

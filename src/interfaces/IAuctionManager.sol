@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
@@ -19,21 +19,23 @@ interface IAuctionManager {
      * @dev Supports both NFTs and off-chain assets
      */
     struct Auction {
-        address seller; // 20 bytes
-        uint96 reservePrice; // 12 bytes - Maximum ~79 billion ETH
-        address nftContract; // 20 bytes - For NFTs only, address(0) for off-chain
-        uint96 highestBid; // 12 bytes
-        address highestBidder; // 20 bytes
-        uint16 bidIncrementBps; // 2 bytes - Basis points (e.g., 500 = 5%)
-        uint64 tokenId; // 8 bytes - For NFTs only
-        uint32 startTime; // 4 bytes - Unix timestamp
-        uint32 endTime; // 4 bytes - Unix timestamp
-        AssetTypes.AssetType assetType; // 1 byte - Type of asset being auctioned
-        AssetTypes.TokenStandard standard; // 1 byte - For NFTs only
-        bool active; // 1 byte
-        bool settled; // 1 byte
-        uint16 quantity; // 2 bytes - For ERC1155
-        bytes32 assetHash; // 32 bytes - Hash of asset details (for off-chain assets)
+        address seller; //
+        uint96 reservePrice;
+        // Maximum ~79 billion ETH
+        address nftContract; // For NFTs only, address(0) for off-chain
+        uint96 highestBid;
+        address highestBidder; //
+        uint16 bidIncrementBps;
+        //Basis points (e.g., 500 = 5%)
+        uint64 tokenId; // For NFTs only
+        uint32 startTime; // Unix timestamp
+        uint32 endTime; // Unix timestamp
+        AssetTypes.AssetType assetType; // Type of asset being auctioned
+        AssetTypes.TokenStandard standard; // For NFTs only
+        bool active;
+        bool settled;
+        uint16 quantity; //For ERC1155
+        bytes32 assetHash; // Hash of asset details (for off-chain assets)
         string metadataURI; // IPFS link to asset metadata
     }
 
@@ -59,30 +61,17 @@ interface IAuctionManager {
     /**
      * @notice Emitted when a bid is placed
      */
-    event BidPlaced(
-        uint256 indexed auctionId,
-        address indexed bidder,
-        uint256 bidAmount,
-        uint256 newEndTime
-    );
+    event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 bidAmount, uint256 newEndTime);
 
     /**
      * @notice Emitted when previous bidder is refunded immediately
      */
-    event BidRefunded(
-        uint256 indexed auctionId,
-        address indexed bidder,
-        uint256 amount
-    );
+    event BidRefunded(uint256 indexed auctionId, address indexed bidder, uint256 amount);
 
     /**
      * @notice Emitted when a bid refund is queued for manual withdrawal
      */
-    event BidRefundQueued(
-        uint256 indexed auctionId,
-        address indexed bidder,
-        uint256 amount
-    );
+    event BidRefundQueued(uint256 indexed auctionId, address indexed bidder, uint256 amount);
 
     /**
      * @notice Emitted when a user withdraws their pending refunds
@@ -106,20 +95,12 @@ interface IAuctionManager {
     /**
      * @notice Emitted when an auction is cancelled
      */
-    event AuctionCancelled(
-        uint256 indexed auctionId,
-        address indexed seller,
-        string reason
-    );
+    event AuctionCancelled(uint256 indexed auctionId, address indexed seller, string reason);
 
     /**
      * @notice Emitted when reserve price is not met and auction fails
      */
-    event AuctionFailedReserveNotMet(
-        uint256 indexed auctionId,
-        uint256 highestBid,
-        uint256 reservePrice
-    );
+    event AuctionFailedReserveNotMet(uint256 indexed auctionId, uint256 highestBid, uint256 reservePrice);
 
     // ============================================
     //                   ERRORS
@@ -133,16 +114,8 @@ interface IAuctionManager {
     error QuantityShouldBeZeroForOffChain();
     error AssetHashRequiredForOffChain();
     error MetadataURIRequiredForOffChain();
-    error EmergencyWithdrawalTooEarly(
-        uint256 auctionId,
-        uint256 currentTime,
-        uint256 availableAfter
-    );
-    error EmergencyWithdrawalNotAuthorized(
-        address caller,
-        address seller,
-        address highestBidder
-    );
+    error EmergencyWithdrawalTooEarly(uint256 auctionId, uint256 currentTime, uint256 availableAfter);
+    error EmergencyWithdrawalNotAuthorized(address caller, address seller, address highestBidder);
     error EmergencyWithdrawalAlreadySettled(uint256 auctionId);
     error InvalidAuctionId(uint256 auctionId);
     error AuctionNotActive(uint256 auctionId);
@@ -230,9 +203,7 @@ interface IAuctionManager {
      * @param auctionId Auction identifier
      * @return auction Auction struct
      */
-    function getAuction(
-        uint256 auctionId
-    ) external view returns (Auction memory auction);
+    function getAuction(uint256 auctionId) external view returns (Auction memory auction);
 
     /**
      * @notice Get minimum bid for an auction
@@ -260,18 +231,14 @@ interface IAuctionManager {
      * @param seller Seller address
      * @return Array of auction IDs
      */
-    function getSellerAuctions(
-        address seller
-    ) external view returns (uint256[] memory);
+    function getSellerAuctions(address seller) external view returns (uint256[] memory);
 
     /**
      * @notice Get auctions where address is highest bidder
      * @param bidder Bidder address
      * @return Array of auction IDs
      */
-    function getBidderAuctions(
-        address bidder
-    ) external view returns (uint256[] memory);
+    function getBidderAuctions(address bidder) external view returns (uint256[] memory);
 
     /**
      * @notice Calculate payment distribution for an auction
@@ -281,15 +248,8 @@ interface IAuctionManager {
      * @return sellerNet Net amount to seller
      * @return royaltyReceiver Royalty recipient address
      */
-    function calculatePaymentDistribution(
-        uint256 auctionId
-    )
+    function calculatePaymentDistribution(uint256 auctionId)
         external
         view
-        returns (
-            uint256 platformFee,
-            uint256 royaltyFee,
-            uint256 sellerNet,
-            address royaltyReceiver
-        );
+        returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver);
 }

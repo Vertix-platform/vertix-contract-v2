@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
-import {ERC721URIStorageUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
-import {ERC721BurnableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
+import {ERC721URIStorageUpgradeable} from
+    "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
+import {ERC721BurnableUpgradeable} from
+    "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
 import {ERC2981Upgradeable} from "@openzeppelin/contracts-upgradeable/token/common/ERC2981Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -47,6 +49,7 @@ contract VertixNFT721 is
     error InvalidMaxSupply(uint256 supply);
     error ExceedsMaxSupply(uint256 requested, uint256 available);
     error EmptyBatch();
+    error BatchSizeTooLarge(uint256 provided, uint256 maximum);
 
     // ============================================
     //          STATE VARIABLES
@@ -67,15 +70,21 @@ contract VertixNFT721 is
     /// @notice Collection creator
     address public creator;
 
+    /// @notice Maximum batch mint size to prevent gas limit issues
+    uint256 public constant MAX_BATCH_MINT_SIZE = 100;
+
+    /**
+     * @dev Gap for future storage variables to prevent storage collisions
+     * This allows adding new state variables in future upgrades without breaking storage layout
+     * 50 slots reserved (current usage: 5 slots above)
+     */
+    uint256[44] private __gap;
+
     // ============================================
     //             EVENTS
     // ============================================
 
-    event BatchMinted(
-        address indexed to,
-        uint256 startTokenId,
-        uint256 quantity
-    );
+    event BatchMinted(address indexed to, uint256 startTokenId, uint256 quantity);
     event RoyaltyUpdated(address indexed receiver, uint96 feeBps);
     event MaxSupplyUpdated(uint256 newMaxSupply);
     event BaseURIUpdated(string newBaseURI);
@@ -129,8 +138,9 @@ contract VertixNFT721 is
         }
 
         if (royaltyFeeBps_ > 0) {
-            if (royaltyReceiver_ == address(0))
+            if (royaltyReceiver_ == address(0)) {
                 revert Errors.InvalidRoyaltyReceiver();
+            }
             _setDefaultRoyalty(royaltyReceiver_, royaltyFeeBps_);
         }
 
@@ -150,10 +160,7 @@ contract VertixNFT721 is
      * @param uri Token URI
      * @return tokenId Minted token ID
      */
-    function mint(
-        address to,
-        string memory uri
-    ) external onlyOwner whenNotPaused returns (uint256 tokenId) {
+    function mint(address to, string memory uri) external onlyOwner whenNotPaused returns (uint256 tokenId) {
         // Check max supply
         if (maxSupply > 0 && totalMinted >= maxSupply) {
             revert MaxSupplyReached();
@@ -174,12 +181,17 @@ contract VertixNFT721 is
      * @param uris Array of token URIs
      * @return startTokenId First token ID in batch
      */
-    function batchMint(
-        address to,
-        string[] memory uris
-    ) external onlyOwner whenNotPaused returns (uint256 startTokenId) {
+    function batchMint(address to, string[] memory uris)
+        external
+        onlyOwner
+        whenNotPaused
+        returns (uint256 startTokenId)
+    {
         uint256 quantity = uris.length;
         if (quantity == 0) revert EmptyBatch();
+        if (quantity > MAX_BATCH_MINT_SIZE) {
+            revert BatchSizeTooLarge(quantity, MAX_BATCH_MINT_SIZE);
+        }
 
         // Check max supply
         if (maxSupply > 0) {
@@ -191,8 +203,8 @@ contract VertixNFT721 is
 
         startTokenId = _tokenIdCounter;
 
-        for (uint256 i = 0; i < quantity; i++) {
-            uint256 tokenId = _tokenIdCounter++;
+        for (uint256 i = 0; i < quantity; ++i) {
+            uint256 tokenId = ++_tokenIdCounter;
             _safeMint(to, tokenId);
             _setTokenURI(tokenId, uris[i]);
         }
@@ -213,10 +225,7 @@ contract VertixNFT721 is
      * @param receiver Royalty receiver address
      * @param feeBps Fee in basis points (max 1000 = 10%)
      */
-    function setDefaultRoyalty(
-        address receiver,
-        uint96 feeBps
-    ) external onlyOwner {
+    function setDefaultRoyalty(address receiver, uint96 feeBps) external onlyOwner {
         if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
             revert InvalidRoyalty(feeBps);
         }
@@ -232,11 +241,7 @@ contract VertixNFT721 is
      * @param receiver Royalty receiver address
      * @param feeBps Fee in basis points
      */
-    function setTokenRoyalty(
-        uint256 tokenId,
-        address receiver,
-        uint96 feeBps
-    ) external onlyOwner {
+    function setTokenRoyalty(uint256 tokenId, address receiver, uint96 feeBps) external onlyOwner {
         if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
             revert InvalidRoyalty(feeBps);
         }
@@ -260,7 +265,7 @@ contract VertixNFT721 is
     }
 
     // ============================================
-    // ADMIN FUNCTIONS
+    //            ADMIN FUNCTIONS
     // ============================================
 
     /**
@@ -308,9 +313,7 @@ contract VertixNFT721 is
         return _baseTokenURI;
     }
 
-    function tokenURI(
-        uint256 tokenId
-    )
+    function tokenURI(uint256 tokenId)
         public
         view
         override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
@@ -319,24 +322,14 @@ contract VertixNFT721 is
         return super.tokenURI(tokenId);
     }
 
-    function _update(
-        address to,
-        uint256 tokenId,
-        address auth
-    ) internal override whenNotPaused returns (address) {
+    function _update(address to, uint256 tokenId, address auth) internal override whenNotPaused returns (address) {
         return super._update(to, tokenId, auth);
     }
 
-    function supportsInterface(
-        bytes4 interfaceId
-    )
+    function supportsInterface(bytes4 interfaceId)
         public
         view
-        override(
-            ERC721Upgradeable,
-            ERC721URIStorageUpgradeable,
-            ERC2981Upgradeable
-        )
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable, ERC2981Upgradeable)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);

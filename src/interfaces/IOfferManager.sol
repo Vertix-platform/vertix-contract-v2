@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
@@ -17,15 +17,15 @@ interface IOfferManager {
      * @notice Offer data structure (storage optimized)
      */
     struct Offer {
-        address offeror; // 20 bytes - Person making the offer
-        uint96 amount; // 12 bytes - Offer amount
-        address seller; // 20 bytes - Original seller
-        uint32 createdAt; // 4 bytes - Offer creation timestamp
-        uint32 expiresAt; // 4 bytes - Offer expiration timestamp
-        bool active; // 1 byte - Offer is active
-        bool accepted; // 1 byte - Offer has been accepted
-        uint256 listingId; // 32 bytes - Reference to marketplace listing
-        AssetTypes.AssetType assetType; // 1 byte
+        address buyer; // Person making the offer (buyer)
+        uint96 amount; // Offer amount
+        address seller; // Original seller
+        uint32 createdAt; // Offer creation timestamp
+        uint32 expiresAt; // Offer expiration timestamp
+        bool active; // Offer is active
+        bool accepted; // Offer has been accepted
+        uint256 listingId; // Reference to marketplace listing
+        AssetTypes.AssetType assetType;
     }
 
     // ============================================
@@ -38,7 +38,7 @@ interface IOfferManager {
     event OfferMade(
         uint256 indexed offerId,
         uint256 indexed listingId,
-        address indexed offeror,
+        address indexed buyer,
         address seller,
         uint256 amount,
         uint256 expiresAt,
@@ -49,51 +49,32 @@ interface IOfferManager {
      * @notice Emitted when an offer is accepted
      */
     event OfferAccepted(
-        uint256 indexed offerId,
-        uint256 indexed listingId,
-        address indexed seller,
-        address offeror,
-        uint256 amount
+        uint256 indexed offerId, uint256 indexed listingId, address indexed seller, address buyer, uint256 amount
     );
 
     /**
      * @notice Emitted when an offer is rejected
      */
     event OfferRejected(
-        uint256 indexed offerId,
-        uint256 indexed listingId,
-        address indexed seller,
-        address offeror,
-        string reason
+        uint256 indexed offerId, uint256 indexed listingId, address indexed seller, address buyer, string reason
     );
 
     /**
-     * @notice Emitted when an offer is cancelled by offeror
+     * @notice Emitted when an offer is cancelled by buyer
      */
     event OfferCancelled(
-        uint256 indexed offerId,
-        uint256 indexed listingId,
-        address indexed offeror,
-        uint256 refundAmount
+        uint256 indexed offerId, uint256 indexed listingId, address indexed buyer, uint256 refundAmount
     );
 
     /**
      * @notice Emitted when an offer expires
      */
-    event OfferExpired(
-        uint256 indexed offerId,
-        uint256 indexed listingId,
-        address indexed offeror
-    );
+    event OfferExpired(uint256 indexed offerId, uint256 indexed listingId, address indexed buyer);
 
     /**
      * @notice Emitted when offer funds are refunded
      */
-    event OfferRefunded(
-        uint256 indexed offerId,
-        address indexed offeror,
-        uint256 amount
-    );
+    event OfferRefunded(uint256 indexed offerId, address indexed buyer, uint256 amount);
 
     // ============================================
     //                   ERRORS
@@ -105,14 +86,16 @@ interface IOfferManager {
     error OfferExpiredError(uint256 offerId, uint256 expiresAt);
     error OfferAlreadyAccepted(uint256 offerId);
     error UnauthorizedSeller(address caller, address seller);
-    error UnauthorizedOfferor(address caller, address offeror);
+    error UnauthorizedBuyer(address caller, address buyer);
     error InvalidOfferAmount(uint256 amount);
     error InvalidOfferDuration(uint256 duration);
-    error CannotOfferOwnListing(address offeror);
+    error CannotOfferOwnListing(address buyer);
     error ListingNotActive(uint256 listingId);
     error InsufficientOfferAmount();
     error TransferFailed(address recipient, uint256 amount);
     error ListingAlreadySold(uint256 listingId);
+    error NFTNotApproved(address nftContract, uint256 tokenId);
+    error BatchSizeTooLarge(uint256 provided, uint256 maximum);
 
     // ============================================
     //                FUNCTIONS
@@ -125,10 +108,7 @@ interface IOfferManager {
      * @return offerId Unique offer identifier
      * @dev Offer amount is msg.value, funds are locked until offer resolved
      */
-    function makeOffer(
-        uint256 listingId,
-        uint256 duration
-    ) external payable returns (uint256 offerId);
+    function makeOffer(uint256 listingId, uint256 duration) external payable returns (uint256 offerId);
 
     /**
      * @notice Accept an offer (seller only)
@@ -141,12 +121,12 @@ interface IOfferManager {
      * @notice Reject an offer (seller only)
      * @param offerId Offer identifier
      * @param reason Reason for rejection
-     * @dev Refunds offeror immediately
+     * @dev Refunds buyer immediately
      */
     function rejectOffer(uint256 offerId, string calldata reason) external;
 
     /**
-     * @notice Cancel an offer (offeror only)
+     * @notice Cancel an offer (buyer only)
      * @param offerId Offer identifier
      * @dev Can only cancel active, non-accepted offers
      */
@@ -162,9 +142,16 @@ interface IOfferManager {
     /**
      * @notice Batch cancel multiple offers
      * @param offerIds Array of offer identifiers
-     * @dev Useful for offeror to cancel multiple offers at once
+     * @dev Useful for buyer to cancel multiple offers at once
      */
     function batchCancelOffers(uint256[] calldata offerIds) external;
+
+    /**
+     * @notice Claim refund for offer on sold/cancelled listing
+     * @param offerId Offer identifier
+     * @dev Allows buyers to claim refunds when their offer becomes invalid
+     */
+    function claimRefundForInvalidOffer(uint256 offerId) external;
 
     // ============================================
     //             VIEW FUNCTIONS
@@ -175,45 +162,35 @@ interface IOfferManager {
      * @param offerId Offer identifier
      * @return offer Offer struct
      */
-    function getOffer(
-        uint256 offerId
-    ) external view returns (Offer memory offer);
+    function getOffer(uint256 offerId) external view returns (Offer memory offer);
 
     /**
      * @notice Get all offers for a listing
      * @param listingId Listing identifier
      * @return Array of offer IDs
      */
-    function getListingOffers(
-        uint256 listingId
-    ) external view returns (uint256[] memory);
+    function getListingOffers(uint256 listingId) external view returns (uint256[] memory);
 
     /**
      * @notice Get active offers for a listing
      * @param listingId Listing identifier
      * @return Array of active offer IDs
      */
-    function getActiveListingOffers(
-        uint256 listingId
-    ) external view returns (uint256[] memory);
+    function getActiveListingOffers(uint256 listingId) external view returns (uint256[] memory);
 
     /**
      * @notice Get offers made by an address
-     * @param offeror Offeror address
+     * @param buyer Buyer address
      * @return Array of offer IDs
      */
-    function getOfferorOffers(
-        address offeror
-    ) external view returns (uint256[] memory);
+    function getBuyerOffers(address buyer) external view returns (uint256[] memory);
 
     /**
      * @notice Get offers received by a seller
      * @param seller Seller address
      * @return Array of offer IDs
      */
-    function getSellerOffers(
-        address seller
-    ) external view returns (uint256[] memory);
+    function getSellerOffers(address seller) external view returns (uint256[] memory);
 
     /**
      * @notice Check if offer is active

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 /**
  * @title Errors
@@ -63,6 +63,7 @@ library Errors {
     /// @notice Caller is not authorized for this action
     /// @param caller Address that attempted the action
     error NotAuthorized(address caller);
+    error BuyerCannotBeSeller();
 
     // ============================================
     //            VALIDATION ERRORS

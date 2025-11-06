@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
-import "../interfaces/IReputationManager.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/Errors.sol";
-import "../access/RoleManager.sol";
+import {IReputationManager} from "../interfaces/IReputationManager.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {Errors} from "../libraries/Errors.sol";
+import {RoleManager} from "../access/RoleManager.sol";
 
 /**
  * @title ReputationManager
@@ -28,7 +28,7 @@ contract ReputationManager is IReputationManager {
     using AssetTypes for *;
 
     // ============================================
-    // STATE VARIABLES
+    //           STATE VARIABLES
     // ============================================
 
     /// @notice User address => reputation data
@@ -53,7 +53,7 @@ contract ReputationManager is IReputationManager {
     int256 public constant BAN_THRESHOLD = -100;
 
     // ============================================
-    // CONSTRUCTOR
+    //              CONSTRUCTOR
     // ============================================
 
     constructor(address _roleManager) {
@@ -62,7 +62,7 @@ contract ReputationManager is IReputationManager {
     }
 
     // ============================================
-    // CORE FUNCTIONS
+    //             CORE FUNCTIONS
     // ============================================
 
     /**
@@ -75,10 +75,7 @@ contract ReputationManager is IReputationManager {
 
         // Only authorized contracts can update reputation
         // In production, check msg.sender is authorized contract
-        bool isAuthorized = roleManager.hasRole(
-            roleManager.ADMIN_ROLE(),
-            msg.sender
-        ) || msg.sender == address(this); // Allow internal calls
+        bool isAuthorized = roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender) || msg.sender == address(this); // Allow internal calls
         if (!isAuthorized) revert Errors.NotAuthorized(msg.sender);
 
         Reputation storage rep = reputations[user];
@@ -160,63 +157,13 @@ contract ReputationManager is IReputationManager {
     }
 
     // ============================================
-    // VIEW FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Get full reputation data for user
-     */
-    function getReputation(
-        address user
-    ) external view returns (Reputation memory) {
-        return reputations[user];
-    }
-
-    /**
-     * @notice Get reputation score (with decay applied)
-     */
-    function getReputationScore(address user) external view returns (int256) {
-        Reputation memory rep = reputations[user];
-
-        if (rep.lastActivityTime == 0) return 100; // New user
-
-        // Calculate decay
-        uint256 inactiveDays = (block.timestamp - rep.lastActivityTime) /
-            INACTIVITY_PERIOD;
-        int256 decayPoints = int256(inactiveDays) * POINTS_INACTIVITY_DECAY;
-
-        return rep.score + decayPoints;
-    }
-
-    /**
-     * @notice Check if user is in good standing
-     */
-    function isGoodStanding(address user) external view returns (bool) {
-        Reputation memory rep = reputations[user];
-
-        if (rep.isBanned) return false;
-
-        int256 currentScore = this.getReputationScore(user);
-        return currentScore >= AssetTypes.MIN_GOOD_STANDING_SCORE;
-    }
-
-    /**
-     * @notice Check if user is banned
-     */
-    function isBanned(address user) external view returns (bool) {
-        return reputations[user].isBanned;
-    }
-
-    // ============================================
-    // INTERNAL FUNCTIONS
+    //           INTERNAL FUNCTIONS
     // ============================================
 
     /**
      * @notice Get points for a reputation action
      */
-    function _getPointsForAction(
-        ReputationAction action
-    ) internal pure returns (int256) {
+    function _getPointsForAction(ReputationAction action) internal pure returns (int256) {
         if (action == ReputationAction.SuccessfulSale) {
             return POINTS_SUCCESSFUL_SALE;
         }
@@ -244,12 +191,56 @@ contract ReputationManager is IReputationManager {
 
         if (rep.lastActivityTime == 0) return;
 
-        uint256 inactiveDays = (block.timestamp - rep.lastActivityTime) /
-            INACTIVITY_PERIOD;
+        uint256 inactiveDays = (block.timestamp - rep.lastActivityTime) / INACTIVITY_PERIOD;
 
         if (inactiveDays > 0) {
             int256 decayPoints = int256(inactiveDays) * POINTS_INACTIVITY_DECAY;
             rep.score += decayPoints;
         }
+    }
+
+    // ============================================
+    //          VIEW FUNCTIONS
+    // ============================================
+
+    /**
+     * @notice Get full reputation data for user
+     */
+    function getReputation(address user) external view returns (Reputation memory) {
+        return reputations[user];
+    }
+
+    /**
+     * @notice Get reputation score (with decay applied)
+     */
+    function getReputationScore(address user) external view returns (int256) {
+        Reputation memory rep = reputations[user];
+
+        if (rep.lastActivityTime == 0) return 100; // New user
+
+        // Calculate decay
+        uint256 inactiveDays = (block.timestamp - rep.lastActivityTime) / INACTIVITY_PERIOD;
+        int256 decayPoints = int256(inactiveDays) * POINTS_INACTIVITY_DECAY;
+
+        return rep.score + decayPoints;
+    }
+
+    /**
+     * @notice Check if user is in good standing
+     */
+    function isGoodStanding(address user) external view returns (bool) {
+        Reputation memory rep = reputations[user];
+
+        if (rep.isBanned) return false;
+
+        int256 currentScore = this.getReputationScore(user);
+        return currentScore >= AssetTypes.MIN_GOOD_STANDING_SCORE;
+    }
+
+    /**
+     * @notice Check if user is banned
+     */
+    function isBanned(address user) external view returns (bool) {
+        return reputations[user].isBanned;
     }
 }

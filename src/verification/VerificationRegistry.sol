@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IVerificationRegistry.sol";
@@ -35,7 +35,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     using AssetTypes for AssetTypes.AssetType;
 
     // ============================================
-    // STATE VARIABLES
+    //          STATE VARIABLES
     // ============================================
 
     /// @notice Verification counter
@@ -51,8 +51,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     mapping(address => uint256[]) public ownerVerifications;
 
     /// @notice Owner => AssetType => verification ID (for quick lookup)
-    mapping(address => mapping(AssetTypes.AssetType => uint256))
-        public ownerAssetVerification;
+    mapping(address => mapping(AssetTypes.AssetType => uint256)) public ownerAssetVerification;
 
     /// @notice Verification ID => owner address (reverse mapping for efficient lookups)
     mapping(uint256 => address) public verificationOwner;
@@ -64,7 +63,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     RoleManager public immutable roleManager;
 
     // ============================================
-    // CONSTRUCTOR
+    //              CONSTRUCTOR
     // ============================================
 
     /**
@@ -77,7 +76,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     }
 
     // ============================================
-    // CORE FUNCTIONS
+    //            ETERNAL FUNCTIONS
     // ============================================
 
     /**
@@ -136,15 +135,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         ownerAssetVerification[owner][assetType] = verificationId;
         verificationOwner[verificationId] = owner;
 
-        emit VerificationAdded(
-            verificationId,
-            owner,
-            msg.sender,
-            assetType,
-            proofHash,
-            expiresAt,
-            metadataURI
-        );
+        emit VerificationAdded(verificationId, owner, msg.sender, assetType, proofHash, expiresAt, metadataURI);
 
         return verificationId;
     }
@@ -154,20 +145,14 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @param verificationId Verification ID to revoke
      * @param reason Reason for revocation
      */
-    function revokeVerification(
-        uint256 verificationId,
-        string calldata reason
-    ) external nonReentrant {
+    function revokeVerification(uint256 verificationId, string calldata reason) external nonReentrant {
         _validateVerificationExists(verificationId);
 
         Verification storage verification = verifications[verificationId];
 
         // Only verifier or admin can revoke
         bool isVerifier = msg.sender == verification.verifier;
-        bool isAdmin = roleManager.hasRole(
-            roleManager.ADMIN_ROLE(),
-            msg.sender
-        );
+        bool isAdmin = roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender);
 
         if (!isVerifier && !isAdmin) revert Errors.NotAuthorized(msg.sender);
 
@@ -236,23 +221,16 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
             verification.isActive = true;
             // Restore mappings if they were cleared during revocation
             if (owner != address(0)) {
-                ownerAssetVerification[owner][
-                    verification.assetType
-                ] = verificationId;
+                ownerAssetVerification[owner][verification.assetType] = verificationId;
                 verificationOwner[verificationId] = owner;
             }
         }
 
-        emit VerificationRenewed(
-            verificationId,
-            owner,
-            newExpiresAt,
-            verification.verificationCount
-        );
+        emit VerificationRenewed(verificationId, owner, newExpiresAt, verification.verificationCount);
     }
 
     // ============================================
-    // ADMIN FUNCTIONS
+    //           ADMIN FUNCTIONS
     // ============================================
 
     /**
@@ -294,68 +272,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     }
 
     // ============================================
-    // VIEW FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Check if address is verified for asset type
-     * @param owner Asset owner
-     * @param assetType Type of asset
-     * @return True if has active, non-expired verification
-     */
-    function isVerified(
-        address owner,
-        AssetTypes.AssetType assetType
-    ) external view returns (bool) {
-        uint256 verificationId = ownerAssetVerification[owner][assetType];
-
-        if (verificationId == 0) return false;
-
-        Verification memory verification = verifications[verificationId];
-
-        return
-            verification.isActive && block.timestamp <= verification.expiresAt;
-    }
-
-    /**
-     * @notice Get verification details
-     */
-    function getVerification(
-        uint256 verificationId
-    ) external view returns (Verification memory) {
-        _validateVerificationExists(verificationId);
-        return verifications[verificationId];
-    }
-
-    /**
-     * @notice Get all verifications for an owner
-     */
-    function getOwnerVerifications(
-        address owner
-    ) external view returns (uint256[] memory) {
-        return ownerVerifications[owner];
-    }
-
-    /**
-     * @notice Get verification ID for owner + asset type
-     */
-    function getVerificationByOwnerAndType(
-        address owner,
-        AssetTypes.AssetType assetType
-    ) external view returns (uint256) {
-        return ownerAssetVerification[owner][assetType];
-    }
-
-    /**
-     * @notice Check if verification is expired
-     */
-    function isExpired(uint256 verificationId) external view returns (bool) {
-        _validateVerificationExists(verificationId);
-        return block.timestamp > verifications[verificationId].expiresAt;
-    }
-
-    // ============================================
-    // INTERNAL HELPERS
+    //          INTERNAL HELPERS
     // ============================================
 
     function _validateVerificationExists(uint256 verificationId) internal view {
@@ -368,9 +285,61 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @notice Find owner of a verification
      * @dev Uses reverse mapping for efficient O(1) lookup
      */
-    function _findOwner(
-        uint256 verificationId
-    ) internal view returns (address) {
+    function _findOwner(uint256 verificationId) internal view returns (address) {
         return verificationOwner[verificationId];
+    }
+
+    // ============================================
+    //             VIEW FUNCTIONS
+    // ============================================
+
+    /**
+     * @notice Check if address is verified for asset type
+     * @param owner Asset owner
+     * @param assetType Type of asset
+     * @return True if has active, non-expired verification
+     */
+    function isVerified(address owner, AssetTypes.AssetType assetType) external view returns (bool) {
+        uint256 verificationId = ownerAssetVerification[owner][assetType];
+
+        if (verificationId == 0) return false;
+
+        Verification memory verification = verifications[verificationId];
+
+        return verification.isActive && block.timestamp <= verification.expiresAt;
+    }
+
+    /**
+     * @notice Get verification details
+     */
+    function getVerification(uint256 verificationId) external view returns (Verification memory) {
+        _validateVerificationExists(verificationId);
+        return verifications[verificationId];
+    }
+
+    /**
+     * @notice Get all verifications for an owner
+     */
+    function getOwnerVerifications(address owner) external view returns (uint256[] memory) {
+        return ownerVerifications[owner];
+    }
+
+    /**
+     * @notice Get verification ID for owner + asset type
+     */
+    function getVerificationByOwnerAndType(address owner, AssetTypes.AssetType assetType)
+        external
+        view
+        returns (uint256)
+    {
+        return ownerAssetVerification[owner][assetType];
+    }
+
+    /**
+     * @notice Check if verification is expired
+     */
+    function isExpired(uint256 verificationId) external view returns (bool) {
+        _validateVerificationExists(verificationId);
+        return block.timestamp > verifications[verificationId].expiresAt;
     }
 }
