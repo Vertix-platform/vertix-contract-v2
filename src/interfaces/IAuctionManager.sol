@@ -59,6 +59,17 @@ interface IAuctionManager {
     );
 
     /**
+     * @notice Emitted when an NFT is escrowed into the contract at auction creation
+     */
+    event NFTEscrowed(
+        uint256 indexed auctionId,
+        address indexed nftContract,
+        uint256 tokenId,
+        uint256 quantity,
+        AssetTypes.TokenStandard standard
+    );
+
+    /**
      * @notice Emitted when a bid is placed
      */
     event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 bidAmount, uint256 newEndTime);

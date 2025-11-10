@@ -165,10 +165,10 @@ contract NFTMarketplace is ReentrancyGuard {
                 revert InsufficientOwnership();
             }
 
-            // Check approval
+            // Check approval (this contract needs approval to transfer)
             address approved = IERC721(nftContract).getApproved(tokenId);
-            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(from, marketplaceCore);
-            if (approved != marketplaceCore && !isApprovedForAll) {
+            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(from, address(this));
+            if (approved != address(this) && !isApprovedForAll) {
                 revert NotApproved();
             }
 
@@ -181,8 +181,8 @@ contract NFTMarketplace is ReentrancyGuard {
                 revert InsufficientOwnership();
             }
 
-            // Check approval
-            if (!IERC1155(nftContract).isApprovedForAll(from, marketplaceCore)) {
+            // Check approval (this contract needs approval to transfer)
+            if (!IERC1155(nftContract).isApprovedForAll(from, address(this))) {
                 revert NotApproved();
             }
 

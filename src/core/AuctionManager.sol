@@ -2,7 +2,10 @@
 pragma solidity ^0.8.24;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -34,7 +37,7 @@ import {RoleManager} from "../access/RoleManager.sol";
  * - Off-chain assets: Automatic escrow creation buyer/seller
  * - Integration with FeeDistributor for payment distribution
  */
-contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
+contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Receiver, IERC1155Receiver {
     using PercentageMath for uint256;
     using AuctionLogic for *;
 
@@ -56,6 +59,9 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
 
     /// @notice Mapping bidder => array of auction IDs where they're highest bidder
     mapping(address => uint256[]) public bidderAuctions;
+
+    /// @notice Mapping bidder => auctionId => tracked status
+    mapping(address => mapping(uint256 => bool)) private bidderAuctionTracked;
 
     /// @notice Mapping of pending withdrawal amounts for outbid users (pull-over-push pattern)
     mapping(address => uint256) public pendingWithdrawals;
@@ -229,6 +235,13 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         // Track seller auctions
         sellerAuctions[msg.sender].push(auctionId);
 
+        // Escrow NFT into contract to prevent seller from revoking approval or transferring
+        if (AssetTypes.isNFTType(assetType)) {
+            _transferNFT(nftContract, msg.sender, address(this), tokenId, quantity, standard);
+
+            emit NFTEscrowed(auctionId, nftContract, tokenId, quantity, standard);
+        }
+
         emit AuctionCreated(
             auctionId, msg.sender, assetType, nftContract, tokenId, reservePrice, startTime, endTime, bidIncrementBps
         );
@@ -296,8 +309,9 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         }
 
         // Track bidder auctions (add if first bid from this address)
-        if (!_isBidderTracked(msg.sender, auctionId)) {
+        if (!bidderAuctionTracked[msg.sender][auctionId]) {
             bidderAuctions[msg.sender].push(auctionId);
+            bidderAuctionTracked[msg.sender][auctionId] = true;
         }
 
         emit BidPlaced(auctionId, msg.sender, msg.value, newEndTime);
@@ -338,14 +352,34 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
 
         // Check if there were any bids
         if (!AuctionLogic.hasBids(auction.highestBid, auction.highestBidder)) {
-            // No bids - auction failed, NFT stays with seller
+            // No bids - auction failed, return NFT to seller
+            if (AssetTypes.isNFTType(auction.assetType)) {
+                _transferNFT(
+                    auction.nftContract,
+                    address(this),
+                    auction.seller,
+                    auction.tokenId,
+                    auction.quantity,
+                    auction.standard
+                );
+            }
             emit AuctionCancelled(auctionId, auction.seller, "No bids received");
             return;
         }
 
         // Check if reserve price was met
         if (!AuctionLogic.isReserveMet(auction.highestBid, auction.reservePrice)) {
-            // Reserve not met - refund bidder, asset stays with seller
+            // Reserve not met - refund bidder, return NFT to seller
+            if (AssetTypes.isNFTType(auction.assetType)) {
+                _transferNFT(
+                    auction.nftContract,
+                    address(this),
+                    auction.seller,
+                    auction.tokenId,
+                    auction.quantity,
+                    auction.standard
+                );
+            }
             _safeTransfer(auction.highestBidder, auction.highestBid);
 
             emit AuctionFailedReserveNotMet(auctionId, auction.highestBid, auction.reservePrice);
@@ -391,6 +425,13 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         auction.active = false;
         auction.settled = true;
 
+        // Return escrowed NFT to seller
+        if (AssetTypes.isNFTType(auction.assetType)) {
+            _transferNFT(
+                auction.nftContract, address(this), auction.seller, auction.tokenId, auction.quantity, auction.standard
+            );
+        }
+
         emit AuctionCancelled(auctionId, msg.sender, "Cancelled by seller");
     }
 
@@ -424,6 +465,13 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         if (auction.highestBidder != address(0) && auction.highestBid > 0) {
             _safeTransfer(auction.highestBidder, auction.highestBid);
             emit BidRefunded(auctionId, auction.highestBidder, auction.highestBid);
+        }
+
+        // Return escrowed NFT to seller if applicable
+        if (AssetTypes.isNFTType(auction.assetType)) {
+            _transferNFT(
+                auction.nftContract, address(this), auction.seller, auction.tokenId, auction.quantity, auction.standard
+            );
         }
 
         emit AuctionCancelled(auctionId, auction.seller, "Emergency withdrawal");
@@ -592,10 +640,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
      * @param auction Auction data
      */
     function _handleNFTAuctionEnd(uint256 auctionId, Auction memory auction) internal {
-        // Transfer NFT to winner
+        // Transfer NFT from contract escrow to winner
         _transferNFT(
             auction.nftContract,
-            auction.seller,
+            address(this),
             auction.highestBidder,
             auction.tokenId,
             auction.quantity,
@@ -652,17 +700,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
 
         // Note: Seller must now deliver the asset and complete escrow process
         // Buyer (winner) can confirm receipt or open dispute
-    }
-
-    /**
-     * @notice Check if bidder is already tracked for this auction
-     */
-    function _isBidderTracked(address bidder, uint256 auctionId) internal view returns (bool) {
-        uint256[] memory bids = bidderAuctions[bidder];
-        for (uint256 i = 0; i < bids.length; i++) {
-            if (bids[i] == auctionId) return true;
-        }
-        return false;
     }
 
     /**
@@ -779,5 +816,63 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable {
         sellerNet = amount - platformFee - royaltyFee;
 
         return (platformFee, royaltyFee, sellerNet, royaltyReceiver);
+    }
+
+    // ============================================
+    //          NFT RECEIVER FUNCTIONS
+    // ============================================
+
+    /**
+     * @notice Handle the receipt of an ERC721 token
+     * @dev Required to receive ERC721 tokens via safeTransferFrom
+     */
+    function onERC721Received(address, address, uint256, bytes calldata) external pure override returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+
+    /**
+     * @notice Handle the receipt of a single ERC1155 token type
+     * @dev Required to receive ERC1155 tokens via safeTransferFrom
+     */
+    function onERC1155Received(
+        address,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
+    )
+        external
+        pure
+        override
+        returns (bytes4)
+    {
+        return IERC1155Receiver.onERC1155Received.selector;
+    }
+
+    /**
+     * @notice Handle the receipt of multiple ERC1155 token types
+     * @dev Required to receive ERC1155 tokens via safeBatchTransferFrom
+     */
+    function onERC1155BatchReceived(
+        address,
+        address,
+        uint256[] calldata,
+        uint256[] calldata,
+        bytes calldata
+    )
+        external
+        pure
+        override
+        returns (bytes4)
+    {
+        return IERC1155Receiver.onERC1155BatchReceived.selector;
+    }
+
+    /**
+     * @notice Query if a contract implements an interface
+     * @dev Interface identification
+     */
+    function supportsInterface(bytes4 interfaceId) external pure override returns (bool) {
+        return interfaceId == type(IERC721Receiver).interfaceId || interfaceId == type(IERC1155Receiver).interfaceId;
     }
 }

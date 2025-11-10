@@ -38,12 +38,20 @@ contract VertixNFT1155 is
     mapping(uint256 => string) public tokenURIs;
     mapping(uint256 => uint256) public tokenMaxSupply;
 
+    // ============================================
+    //             EVENTS
+    // ============================================
+
+    event TokenCreated(uint256 indexed tokenId, uint256 initialSupply, uint256 maxSupply, string tokenURI);
+    event TokenURIUpdated(uint256 indexed tokenId, string newURI);
+    event RoyaltyUpdated(address indexed receiver, uint96 feeBps);
+
     /**
      * @dev Gap for future storage variables to prevent storage collisions
      * This allows adding new state variables in future upgrades without breaking storage layout
      * 50 slots reserved (current usage: 3 slots + 2 mappings above)
      */
-    uint256[47] private __gap;
+    uint256[44] private __gap;
 
     // ============================================
     //         CONSTRUCTOR & INITIALIZER
@@ -72,6 +80,18 @@ contract VertixNFT1155 is
         external
         initializer
     {
+        // Validate creator
+        if (creator_ == address(0)) revert Errors.InvalidCreator();
+
+        // Validate royalty
+        if (royaltyFeeBps_ > AssetTypes.MAX_ROYALTY_BPS) {
+            revert Errors.RoyaltyTooHigh(royaltyFeeBps_, AssetTypes.MAX_ROYALTY_BPS);
+        }
+
+        if (royaltyFeeBps_ > 0 && royaltyReceiver_ == address(0)) {
+            revert Errors.InvalidRoyaltyReceiver();
+        }
+
         // Initialize parent contracts
         __ERC1155_init(uri_);
         __ERC1155Burnable_init();
@@ -102,6 +122,11 @@ contract VertixNFT1155 is
         onlyOwner
         returns (uint256 tokenId)
     {
+        // Validate that initialSupply doesn't exceed maxSupply
+        if (maxSupply_ > 0 && initialSupply > maxSupply_) {
+            revert Errors.MaxSupplyReached(initialSupply, maxSupply_);
+        }
+
         tokenId = ++_tokenIdCounter;
 
         tokenURIs[tokenId] = tokenURI;
@@ -111,11 +136,13 @@ contract VertixNFT1155 is
             _mint(msg.sender, tokenId, initialSupply, "");
         }
 
+        emit TokenCreated(tokenId, initialSupply, maxSupply_, tokenURI);
+
         return tokenId;
     }
 
     function mint(address to, uint256 tokenId, uint256 amount) external onlyOwner whenNotPaused {
-        if (tokenId >= _tokenIdCounter) {
+        if (tokenId == 0 || tokenId > _tokenIdCounter) {
             revert Errors.TokenDoesNotExist(tokenId);
         }
 
@@ -143,7 +170,11 @@ contract VertixNFT1155 is
     }
 
     function setURI(uint256 tokenId, string memory newuri) external onlyOwner {
+        if (tokenId == 0 || tokenId > _tokenIdCounter) {
+            revert Errors.TokenDoesNotExist(tokenId);
+        }
         tokenURIs[tokenId] = newuri;
+        emit TokenURIUpdated(tokenId, newuri);
     }
 
     // ============================================
@@ -155,6 +186,7 @@ contract VertixNFT1155 is
             revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
         }
         _setDefaultRoyalty(receiver, feeBps);
+        emit RoyaltyUpdated(receiver, feeBps);
     }
 
     function setTokenRoyalty(uint256 tokenId, address receiver, uint96 feeBps) external onlyOwner {

@@ -168,11 +168,11 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         // Revoke
         verification.isActive = false;
 
-        // Find owner and clear mappings
+        // Find owner and clear forward mapping (but keep reverse mapping for renewal)
         address owner = _findOwner(verificationId);
         if (owner != address(0)) {
             delete ownerAssetVerification[owner][verification.assetType];
-            delete verificationOwner[verificationId];
+            // DON'T delete verificationOwner - we need it for renewal
         }
 
         emit VerificationRevoked(verificationId, owner, msg.sender, reason);
