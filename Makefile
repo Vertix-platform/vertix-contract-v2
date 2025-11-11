@@ -1,8 +1,6 @@
-# Makefile for Vertix Contract Development
 
 .PHONY: help install test build coverage validate fmt clean snapshot
 
-# Default target
 help:
 	@echo ""
 	@echo "╔════════════════════════════════════════════════════════╗"
@@ -30,7 +28,6 @@ help:
 	@echo "  make clean-all        Clean everything (including deps)"
 	@echo ""
 
-# Installation
 install:
 	@echo "Installing git hooks..."
 	@chmod +x scripts/install-hooks.sh
@@ -39,7 +36,6 @@ install:
 	@chmod +x .githooks/pre-push
 	@./scripts/install-hooks.sh
 
-# Formatting
 fmt:
 	@echo "Formatting Solidity files..."
 	@forge fmt
@@ -48,7 +44,6 @@ fmt-check:
 	@echo "Checking formatting..."
 	@forge fmt --check
 
-# Building
 build:
 	@echo "Building contracts..."
 	@forge build
@@ -57,7 +52,6 @@ build-sizes:
 	@echo "Building contracts with size report..."
 	@forge build --sizes
 
-# Testing
 test:
 	@echo "Running tests..."
 	@forge test
@@ -133,28 +127,23 @@ deploy-testnet:
 	@echo "Deploying to testnet..."
 	@forge script script/Deploy.s.sol --rpc-url $(RPC_URL) --broadcast --verify
 
-# Dependencies
 update:
 	@echo "Updating dependencies..."
 	@forge update
 
-# Documentation
 docs:
 	@echo "Generating documentation..."
 	@forge doc
 
-# Verification
 verify:
 	@echo "Verifying contract on Etherscan..."
 	@forge verify-contract $(CONTRACT) $(ADDRESS) --chain $(CHAIN)
 
-# Git helpers
 hooks-install: install
 
 hooks-uninstall:
 	@echo "Uninstalling git hooks..."
 	@git config --unset core.hooksPath
 
-# CI/CD
 ci: validate coverage
 	@echo "✓ CI checks passed!"
