@@ -38,12 +38,9 @@ contract ReputationManagerTest is Test {
         // Deploy reputation manager
         reputationManager = new ReputationManager(address(roleManager));
 
-        // Grant admin role to authorized contract for testing
+        // Authorize the test contract to update reputations
         vm.startPrank(admin);
-        roleManager.scheduleRoleGrant(roleManager.ADMIN_ROLE(), authorizedContract);
-        // Fast forward past timelock and execute
-        vm.warp(block.timestamp + roleManager.ROLE_CHANGE_TIMELOCK() + 1);
-        roleManager.executeRoleGrant(roleManager.ADMIN_ROLE(), authorizedContract);
+        reputationManager.addAuthorizedContract(authorizedContract);
         vm.stopPrank();
     }
 
@@ -226,13 +223,13 @@ contract ReputationManagerTest is Test {
         vm.stopPrank();
     }
 
-    function test_UpdateReputation_AllowsAdmin() public {
+    function test_UpdateReputation_AdminCannotUpdateDirectly() public {
+        // Admins should NOT be able to update reputations directly (prevents manipulation)
+        // Only authorized contracts can update reputations
         vm.startPrank(admin);
 
+        vm.expectRevert(abi.encodeWithSelector(Errors.NotAuthorized.selector, admin));
         reputationManager.updateReputation(user1, IReputationManager.ReputationAction.SuccessfulSale);
-
-        IReputationManager.Reputation memory rep = reputationManager.getReputation(user1);
-        assertEq(rep.score, 110);
 
         vm.stopPrank();
     }

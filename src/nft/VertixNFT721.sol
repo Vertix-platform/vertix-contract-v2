@@ -89,14 +89,6 @@ contract VertixNFT721 is
     event MaxSupplyUpdated(uint256 newMaxSupply);
     event BaseURIUpdated(string newBaseURI);
 
-    // ============================================
-    //               CONSTRUCTOR
-    // ============================================
-
-    /**
-     * @notice Constructor for implementation contract (called once)
-     * @dev Disables initializers to prevent implementation from being initialized
-     */
     constructor() {
         _disableInitializers();
     }
@@ -222,10 +214,6 @@ contract VertixNFT721 is
         return startTokenId;
     }
 
-    // ============================================
-    //         ROYALTY FUNCTIONS
-    // ============================================
-
     /**
      * @notice Set default royalty for all tokens
      * @param receiver Royalty receiver address
@@ -270,10 +258,6 @@ contract VertixNFT721 is
         _resetTokenRoyalty(tokenId);
     }
 
-    // ============================================
-    //            ADMIN FUNCTIONS
-    // ============================================
-
     /**
      * @notice Update max supply
      * @param newMaxSupply New maximum supply (must be >= total minted)
@@ -310,10 +294,6 @@ contract VertixNFT721 is
     function unpause() external onlyOwner {
         _unpause();
     }
-
-    // ============================================
-    //             OVERRIDES
-    // ============================================
 
     function _baseURI() internal view override returns (string memory) {
         return _baseTokenURI;

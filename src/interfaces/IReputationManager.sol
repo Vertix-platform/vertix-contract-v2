@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/**
- * @title IReputationManager
- * @notice Interface for on-chain reputation tracking system
- * @dev Tracks user behavior, disputes, and verification status
- */
 interface IReputationManager {
-    // ============================================
-    //                STRUCTS
-    // ============================================
-
-    /**
-     * @notice User reputation data
-     */
     struct Reputation {
         int256 score; // Reputation score (can be negative)
         uint32 successfulSales; // As seller
@@ -25,9 +13,6 @@ interface IReputationManager {
         bool isBanned; // Permanently banned flag
     }
 
-    /**
-     * @notice Reputation action types
-     */
     enum ReputationAction {
         SuccessfulSale, // +10 points
         SuccessfulPurchase, // +5 points
@@ -48,6 +33,10 @@ interface IReputationManager {
     event UserBanned(address indexed user, string reason, address bannedBy);
 
     event UserUnbanned(address indexed user, address unbannedBy);
+
+    event AuthorizedContractAdded(address indexed contractAddress, address indexed addedBy);
+
+    event AuthorizedContractRemoved(address indexed contractAddress, address indexed removedBy);
 
     // ============================================
     //           ERRORS

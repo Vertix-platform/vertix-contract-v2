@@ -12,10 +12,6 @@ import "./Errors.sol";
 library EscrowLogic {
     using AssetTypes for AssetTypes.AssetType;
 
-    // ============================================
-    //           CUSTOM ERRORS
-    // ============================================
-
     error InvalidBuyer(address buyer);
     error InvalidSeller(address seller);
     error BuyerAndSellerSame(address account);
@@ -26,10 +22,6 @@ library EscrowLogic {
     error EscrowNotReleasable();
     error EscrowNotCancellable();
     error VerificationPeriodNotEnded(uint256 currentTime, uint256 deadline);
-
-    // ============================================
-    //        VALIDATION FUNCTIONS
-    // ============================================
 
     /**
      * @notice Validate escrow creation parameters
@@ -97,10 +89,6 @@ library EscrowLogic {
         }
     }
 
-    // ============================================
-    //      DEADLINE CALCULATION FUNCTIONS
-    // ============================================
-
     /**
      * @notice Calculate escrow deadlines based on duration
      * @param duration Escrow duration in seconds
@@ -132,10 +120,6 @@ library EscrowLogic {
         release = createdAt + duration;
         return release;
     }
-
-    // ============================================
-    //        RELEASE LOGIC FUNCTIONS
-    // ============================================
 
     /**
      * @notice Check if escrow can be released
@@ -177,10 +161,6 @@ library EscrowLogic {
         if (block.timestamp >= releaseTime) return 0;
         return releaseTime - block.timestamp;
     }
-
-    // ============================================
-    //      CANCELLATION LOGIC FUNCTIONS
-    // ============================================
 
     /**
      * @notice Check if escrow can be cancelled
@@ -224,10 +204,6 @@ library EscrowLogic {
         return (buyerRefund, sellerCompensation);
     }
 
-    // ============================================
-    //       DISPUTE LOGIC FUNCTIONS
-    // ============================================
-
     /**
      * @notice Check if dispute can be opened
      * @param state Current escrow state
@@ -255,10 +231,6 @@ library EscrowLogic {
     function canCallerDispute(address caller, address buyer, address seller) internal pure returns (bool) {
         return caller == buyer || caller == seller;
     }
-
-    // ============================================
-    //       TIME CALCULATION FUNCTIONS
-    // ============================================
 
     /**
      * @notice Calculate escrow age in days
@@ -304,10 +276,6 @@ library EscrowLogic {
     function hasVerificationPeriodEnded(uint256 verificationDeadline) internal view returns (bool) {
         return block.timestamp > verificationDeadline;
     }
-
-    // ============================================
-    //        UTILITY FUNCTIONS
-    // ============================================
 
     /**
      * @notice Generate unique escrow ID

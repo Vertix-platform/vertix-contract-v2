@@ -11,10 +11,6 @@ import "./AssetTypes.sol";
 library AuctionLogic {
     using AssetTypes for uint256;
 
-    // ============================================
-    //                ERRORS
-    // ============================================
-
     error InvalidSeller();
     error InvalidAuctionDuration(uint256 duration);
     error InvalidBidIncrement(uint256 incrementBps);
@@ -25,10 +21,6 @@ library AuctionLogic {
     error AuctionNotEnded(uint256 auctionId, uint256 endTime);
     error BidderCannotBeSeller(address bidder);
     error ReservePriceNotMet(uint256 highestBid, uint256 reservePrice);
-
-    // ============================================
-    //          VALIDATION FUNCTIONS
-    // ============================================
 
     /**
      * @notice Validate auction creation parameters
@@ -130,10 +122,6 @@ library AuctionLogic {
             revert ReservePriceNotMet(highestBid, reservePrice);
         }
     }
-
-    // ============================================
-    //        CALCULATION FUNCTIONS
-    // ============================================
 
     /**
      * @notice Calculate minimum bid amount

@@ -58,6 +58,9 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     /// @notice Platform fee in basis points
     uint256 public platformFeeBps;
 
+    /// @notice Authorized marketplace contracts that can create escrows on behalf of buyers
+    mapping(address => bool) public authorizedMarketplaces;
+
     /// @notice Reference to role manager
     RoleManager public immutable roleManager;
 
@@ -117,6 +120,12 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     {
         // Validate buyer and seller are different
         if (buyer == seller) revert Errors.BuyerCannotBeSeller();
+
+        // BUYER VALIDATION: Ensure msg.sender is either the buyer or an authorized marketplace
+        // This prevents arbitrary addresses from being set as buyer without their consent
+        if (msg.sender != buyer && !authorizedMarketplaces[msg.sender]) {
+            revert Errors.UnauthorizedEscrowCreation(msg.sender, buyer);
+        }
 
         // Validate inputs
         EscrowLogic.validateEscrowParams(buyer, seller, msg.value, duration);
@@ -455,6 +464,54 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
             revert Errors.NotAdmin(msg.sender);
         }
         _unpause();
+    }
+
+    /**
+     * @notice Add authorized marketplace contract
+     * @param marketplace Address of marketplace contract to authorize
+     * @dev Only admin can authorize marketplaces to create escrows on behalf of buyers
+     */
+    function addAuthorizedMarketplace(address marketplace) external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+        if (marketplace == address(0)) {
+            revert Errors.ZeroAddress();
+        }
+        if (authorizedMarketplaces[marketplace]) {
+            revert Errors.AlreadyAuthorized(marketplace);
+        }
+
+        authorizedMarketplaces[marketplace] = true;
+
+        emit MarketplaceAuthorized(marketplace, msg.sender);
+    }
+
+    /**
+     * @notice Remove authorized marketplace contract
+     * @param marketplace Address of marketplace contract to deauthorize
+     * @dev Only admin can remove marketplace authorization
+     */
+    function removeAuthorizedMarketplace(address marketplace) external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+        if (!authorizedMarketplaces[marketplace]) {
+            revert Errors.NotAuthorized(marketplace);
+        }
+
+        authorizedMarketplaces[marketplace] = false;
+
+        emit MarketplaceDeauthorized(marketplace, msg.sender);
+    }
+
+    /**
+     * @notice Check if marketplace is authorized
+     * @param marketplace Address to check
+     * @return True if authorized
+     */
+    function isAuthorizedMarketplace(address marketplace) external view returns (bool) {
+        return authorizedMarketplaces[marketplace];
     }
 
     // ============================================

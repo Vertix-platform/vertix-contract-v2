@@ -44,16 +44,6 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     /// @notice ERC-2981 interface ID
     bytes4 private constant INTERFACE_ID_ERC2981 = 0x2a55205a;
 
-    // ============================================
-    //              CONSTRUCTOR
-    // ============================================
-
-    /**
-     * @notice Initialize fee distributor
-     * @param _roleManager Address of role manager contract
-     * @param _feeCollector Address to receive platform fees
-     * @param _platformFeeBps Initial platform fee in basis points
-     */
     constructor(address _roleManager, address _feeCollector, uint256 _platformFeeBps) {
         if (_roleManager == address(0)) {
             revert Errors.InvalidRoleManager();
@@ -67,16 +57,15 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         roleManager = RoleManager(_roleManager);
         feeCollector = _feeCollector;
         platformFeeBps = _platformFeeBps;
+
+        emit PlatformFeeUpdated(0, _platformFeeBps);
+        emit FeeCollectorUpdated(address(0), _feeCollector);
     }
 
-    receive() external payable {
+    receive() external payable nonReentrant {
         accumulatedFees += msg.value;
         emit FeesReceived(msg.sender, msg.value);
     }
-
-    // ============================================
-    //          CORE FUNCTIONS
-    // ============================================
 
     /**
      * @notice Distribute sale proceeds with fees and royalties
@@ -115,6 +104,11 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
             if (royaltyAmount > maxRoyalty) {
                 revert RoyaltyTooHigh();
             }
+        }
+
+        // Validate that fees don't exceed the sale amount (prevent underflow)
+        if (platformFee + royaltyAmount > amount) {
+            revert InvalidFeeBps(platformFee + royaltyAmount);
         }
 
         // Calculate seller net
@@ -164,10 +158,6 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
 
         return distribution;
     }
-
-    // ============================================
-    //          ADMIN FUNCTIONS
-    // ============================================
 
     /**
      * @notice Update platform fee (FEE_MANAGER_ROLE only)

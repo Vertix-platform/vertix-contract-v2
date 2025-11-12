@@ -15,17 +15,9 @@ library PercentageMath {
     /// @notice Basis points denominator (100%)
     uint256 internal constant BP_BASE = 10_000;
 
-    // ============================================
-    //         CUSTOM ERRORS
-    // ============================================
-
     error PercentageTooHigh(uint256 provided, uint256 maximum);
     error InvalidBasisPoints(uint256 bps);
     error AmountTooSmall();
-
-    // ============================================
-    //          CORE FUNCTIONS
-    // ============================================
 
     /**
      * @notice Calculate percentage of an amount
@@ -80,10 +72,6 @@ library PercentageMath {
         return amount + percentOf(amount, bps);
     }
 
-    // ============================================
-    //        VALIDATION FUNCTIONS
-    // ============================================
-
     /**
      * @notice Validate basis points are within acceptable range
      * @param bps The basis points to validate
@@ -105,10 +93,6 @@ library PercentageMath {
     function validatePercentage(uint256 bps) internal pure {
         if (bps > BP_BASE) revert InvalidBasisPoints(bps);
     }
-
-    // ============================================
-    //       MULTI-WAY SPLIT FUNCTIONS
-    // ============================================
 
     /**
      * @notice Split amount into three parts based on percentages
@@ -197,10 +181,6 @@ library PercentageMath {
         return (part1, part2, part3, remainder);
     }
 
-    // ============================================
-    //         UTILITY FUNCTIONS
-    // ============================================
-
     /**
      * @notice Calculate what percentage one value is of another
      * @param part The part value
@@ -238,7 +218,7 @@ library PercentageMath {
         if (targetAmount == 0 || feeBps == 0) return targetAmount;
         if (feeBps >= BP_BASE) revert InvalidBasisPoints(feeBps);
 
-        // Formula: amount = target / (1 - fee%)
+        // amount = target / (1 - fee%)
         // In basis points: amount = target * BP_BASE / (BP_BASE - feeBps)
         return (targetAmount * BP_BASE + (BP_BASE - feeBps - 1)) / (BP_BASE - feeBps);
     }

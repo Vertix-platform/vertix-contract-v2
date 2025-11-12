@@ -3,21 +3,7 @@ pragma solidity ^0.8.24;
 
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 
-/**
- * @title IAuctionManager
- * @notice Interface for auction management system
- * @dev Handles English auctions (ascending bid) for NFTs
- */
 interface IAuctionManager {
-    // ============================================
-    //                STRUCTS
-    // ============================================
-
-    /**
-     * @notice Auction data structure (storage optimized)
-     * @dev Packed to minimize storage slots
-     * @dev Supports both NFTs and off-chain assets
-     */
     struct Auction {
         address seller; //
         uint96 reservePrice;
@@ -43,9 +29,6 @@ interface IAuctionManager {
     //                EVENTS
     // ============================================
 
-    /**
-     * @notice Emitted when a new auction is created
-     */
     event AuctionCreated(
         uint256 indexed auctionId,
         address indexed seller,
@@ -58,9 +41,6 @@ interface IAuctionManager {
         uint256 bidIncrementBps
     );
 
-    /**
-     * @notice Emitted when an NFT is escrowed into the contract at auction creation
-     */
     event NFTEscrowed(
         uint256 indexed auctionId,
         address indexed nftContract,
@@ -69,29 +49,14 @@ interface IAuctionManager {
         AssetTypes.TokenStandard standard
     );
 
-    /**
-     * @notice Emitted when a bid is placed
-     */
     event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 bidAmount, uint256 newEndTime);
 
-    /**
-     * @notice Emitted when previous bidder is refunded immediately
-     */
     event BidRefunded(uint256 indexed auctionId, address indexed bidder, uint256 amount);
 
-    /**
-     * @notice Emitted when a bid refund is queued for manual withdrawal
-     */
     event BidRefundQueued(uint256 indexed auctionId, address indexed bidder, uint256 amount);
 
-    /**
-     * @notice Emitted when a user withdraws their pending refunds
-     */
     event Withdrawn(address indexed user, uint256 amount);
 
-    /**
-     * @notice Emitted when an auction ends successfully
-     */
     event AuctionEnded(
         uint256 indexed auctionId,
         address indexed winner,
@@ -103,14 +68,8 @@ interface IAuctionManager {
         address royaltyReceiver
     );
 
-    /**
-     * @notice Emitted when an auction is cancelled
-     */
     event AuctionCancelled(uint256 indexed auctionId, address indexed seller, string reason);
 
-    /**
-     * @notice Emitted when reserve price is not met and auction fails
-     */
     event AuctionFailedReserveNotMet(uint256 indexed auctionId, uint256 highestBid, uint256 reservePrice);
 
     // ============================================
@@ -150,20 +109,6 @@ interface IAuctionManager {
     //                FUNCTIONS
     // ============================================
 
-    /**
-     * @notice Create a new auction for any asset type
-     * @param assetType Type of asset being auctioned
-     * @param nftContract NFT contract address (only for NFTs, address(0) otherwise)
-     * @param tokenId Token ID to auction (only for NFTs, 0 otherwise)
-     * @param quantity Quantity (for ERC1155, must be 1 for ERC721, 0 for off-chain)
-     * @param reservePrice Minimum winning bid (0 = no reserve)
-     * @param duration Auction duration in seconds
-     * @param bidIncrementBps Minimum bid increment in basis points
-     * @param standard Token standard (ERC721 or ERC1155, only for NFTs)
-     * @param assetHash Hash of asset details (for off-chain assets)
-     * @param metadataURI IPFS link to asset metadata
-     * @return auctionId Unique auction identifier
-     */
     function createAuction(
         AssetTypes.AssetType assetType,
         address nftContract,
@@ -179,88 +124,30 @@ interface IAuctionManager {
         external
         returns (uint256 auctionId);
 
-    /**
-     * @notice Place a bid on an auction
-     * @param auctionId Auction identifier
-     * @dev Bid amount is msg.value, must meet minimum bid requirement
-     */
     function placeBid(uint256 auctionId) external payable;
 
-    /**
-     * @notice End auction and transfer NFT to winner
-     * @param auctionId Auction identifier
-     * @dev Can be called by anyone after auction ends
-     */
     function endAuction(uint256 auctionId) external;
 
-    /**
-     * @notice Cancel auction (only if no bids placed)
-     * @param auctionId Auction identifier
-     * @dev Only seller can cancel, only before first bid
-     */
     function cancelAuction(uint256 auctionId) external;
 
-    /**
-     * @notice Emergency withdrawal if auction ended but not settled
-     * @param auctionId Auction identifier
-     * @dev Allows seller to reclaim NFT or bidder to reclaim bid after extended period
-     */
     function emergencyWithdraw(uint256 auctionId) external;
 
     // ============================================
     //             VIEW FUNCTIONS
     // ============================================
 
-    /**
-     * @notice Get auction details
-     * @param auctionId Auction identifier
-     * @return auction Auction struct
-     */
     function getAuction(uint256 auctionId) external view returns (Auction memory auction);
 
-    /**
-     * @notice Get minimum bid for an auction
-     * @param auctionId Auction identifier
-     * @return Minimum bid amount required
-     */
     function getMinimumBid(uint256 auctionId) external view returns (uint256);
 
-    /**
-     * @notice Check if auction is active
-     * @param auctionId Auction identifier
-     * @return True if auction is accepting bids
-     */
     function isAuctionActive(uint256 auctionId) external view returns (bool);
 
-    /**
-     * @notice Check if auction has ended
-     * @param auctionId Auction identifier
-     * @return True if auction time has expired
-     */
     function hasAuctionEnded(uint256 auctionId) external view returns (bool);
 
-    /**
-     * @notice Get auctions created by a seller
-     * @param seller Seller address
-     * @return Array of auction IDs
-     */
     function getSellerAuctions(address seller) external view returns (uint256[] memory);
 
-    /**
-     * @notice Get auctions where address is highest bidder
-     * @param bidder Bidder address
-     * @return Array of auction IDs
-     */
     function getBidderAuctions(address bidder) external view returns (uint256[] memory);
 
-    /**
-     * @notice Calculate payment distribution for an auction
-     * @param auctionId Auction identifier
-     * @return platformFee Platform fee amount
-     * @return royaltyFee Royalty fee amount
-     * @return sellerNet Net amount to seller
-     * @return royaltyReceiver Royalty recipient address
-     */
     function calculatePaymentDistribution(uint256 auctionId)
         external
         view

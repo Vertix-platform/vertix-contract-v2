@@ -32,10 +32,6 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     using PercentageMath for uint256;
     using AssetTypes for AssetTypes.AssetType;
 
-    // ============================================
-    //          STATE VARIABLES
-    // ============================================
-
     /// @notice Offer counter for unique IDs
     uint256 public offerCounter;
 
@@ -60,8 +56,8 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     /// @notice Mapping seller => array of offer IDs
     mapping(address => uint256[]) public sellerOffers;
 
-    /// @notice Pending refunds for rejected/cancelled offers (pull-over-push pattern)
-    mapping(address => uint256) public pendingRefunds;
+    /// @notice Mapping offer ID => whether refund is available for claim
+    mapping(uint256 => bool) public offerRefundAvailable;
 
     /// @notice References to external contracts
     RoleManager public immutable roleManager;
@@ -69,18 +65,6 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     IMarketplace public immutable marketplace;
     IEscrowManager public immutable escrowManager;
 
-    // ============================================
-    //           CONSTRUCTOR
-    // ============================================
-
-    /**
-     * @notice Initialize offer manager
-     * @param _roleManager Address of role manager contract
-     * @param _feeDistributor Address of fee distributor contract
-     * @param _marketplace Address of marketplace core contract
-     * @param _escrowManager Address of escrow manager contract
-     * @param _platformFeeBps Initial platform fee in basis points
-     */
     constructor(
         address _roleManager,
         address _feeDistributor,
@@ -102,11 +86,15 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         marketplace = IMarketplace(_marketplace);
         escrowManager = IEscrowManager(_escrowManager);
         platformFeeBps = _platformFeeBps;
+
+        emit PlatformFeeUpdated(0, _platformFeeBps);
     }
 
     // ============================================
-    //               CORE FUNCTIONS
+    //                EVENTS
     // ============================================
+
+    event PlatformFeeUpdated(uint256 oldFee, uint256 newFee);
 
     /**
      * @notice Make an offer on a listing
@@ -251,15 +239,14 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         // Route based on asset type
         if (AssetTypes.isNFTType(offer.assetType)) {
             // NFT - instant transfer with payment distribution
-            _handleNFTOfferAcceptance(offer, listing);
+            _handleNFTOfferAcceptance(offer);
         } else {
             // Off-chain asset - create escrow
             _handleOffChainOfferAcceptance(offer, listing);
         }
 
-        // Note: Other offers for this listing are automatically invalidated
-        // because the listing status changed to Sold. Users can claim refunds
-        // via claimRefundForInvalidOffer()
+        // Automatically refund all other active offers on this listing
+        _refundOtherOffersOnListing(offer.listingId, offerId);
 
         emit OfferAccepted(offerId, offer.listingId, msg.sender, offer.buyer, offer.amount);
     }
@@ -397,7 +384,7 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     /**
      * @notice Handle NFT offer acceptance (instant transfer)
      */
-    function _handleNFTOfferAcceptance(Offer memory offer, IMarketplace.Listing memory /* listing */ ) internal {
+    function _handleNFTOfferAcceptance(Offer memory offer) internal {
         // Get NFT details from marketplace
         IMarketplace.NFTDetails memory nft = marketplace.getNFTDetails(offer.listingId);
 
@@ -442,10 +429,6 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
             listing.assetHash, // assetHash
             listing.metadataURI // metadataURI
         );
-
-        // Escrow created successfully
-        // Buyer is now the escrow buyer
-        // Seller must deliver and complete escrow process
     }
 
     /**
@@ -488,12 +471,83 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Safe ETH transfer with proper error handling
+     * @notice Claim refund for an offer where automatic refund failed
+     * @param offerId Offer identifier
+     * @dev This allows buyers to manually claim refunds when automatic transfer fails
+     * @dev Common scenarios: buyer is a contract that reverts, or has high gas requirements
      */
+    function claimFailedRefund(uint256 offerId) external nonReentrant {
+        Offer storage offer = offers[offerId];
+
+        // Validate offer exists
+        _validateOfferExists(offerId);
+
+        // Only the buyer can claim their refund
+        if (msg.sender != offer.buyer) {
+            revert UnauthorizedBuyer(msg.sender, offer.buyer);
+        }
+
+        // Check if refund is available
+        if (!offerRefundAvailable[offerId]) {
+            revert NoRefundAvailable(offerId);
+        }
+
+        // Mark refund as claimed
+        offerRefundAvailable[offerId] = false;
+
+        // Transfer refund to buyer
+        uint256 refundAmount = offer.amount;
+        _safeTransfer(offer.buyer, refundAmount);
+
+        emit OfferRefunded(offerId, offer.buyer, refundAmount);
+    }
+
     function _safeTransfer(address recipient, uint256 amount) internal {
         if (amount == 0) return;
         (bool success,) = recipient.call{value: amount}("");
         if (!success) revert TransferFailed(recipient, amount);
+    }
+
+    /**
+     * @notice Refund all other active offers on a listing (except the accepted one)
+     * @param listingId Listing ID
+     * @param acceptedOfferId The offer ID that was accepted (skip this one)
+     * @dev Called when an offer is accepted to invalidate competing offers
+     * @dev Uses pull-over-push pattern: tries to refund, but allows manual claim if transfer fails
+     */
+    function _refundOtherOffersOnListing(uint256 listingId, uint256 acceptedOfferId) internal {
+        uint256[] memory allOffers = listingOffers[listingId];
+
+        for (uint256 i = 0; i < allOffers.length; i++) {
+            uint256 currentOfferId = allOffers[i];
+
+            // Skip the accepted offer
+            if (currentOfferId == acceptedOfferId) {
+                continue;
+            }
+
+            Offer storage offer = offers[currentOfferId];
+
+            // Only process if still active
+            if (!offer.active) {
+                continue;
+            }
+
+            offer.active = false;
+
+            uint256 refundAmount = offer.amount;
+            (bool success,) = offer.buyer.call{value: refundAmount, gas: 100_000}("");
+
+            if (success) {
+                emit OfferRefunded(currentOfferId, offer.buyer, refundAmount);
+            } else {
+                // If refund fails (e.g., buyer is a contract that reverts),
+                // mark refund as available for manual claim
+                offerRefundAvailable[currentOfferId] = true;
+
+                emit OfferInvalidated(currentOfferId, listingId, offer.buyer, refundAmount);
+            }
+        }
     }
 
     /**
@@ -565,19 +619,16 @@ contract OfferManager is IOfferManager, ReentrancyGuard, Pausable {
         return block.timestamp >= offer.expiresAt;
     }
 
-    // ============================================
-    // ADMIN FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Update platform fee (FEE_MANAGER_ROLE only)
-     */
     function updatePlatformFee(uint256 newFeeBps) external {
         if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
             revert Errors.NotFeeManager(msg.sender);
         }
         PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
+
+        uint256 oldFee = platformFeeBps;
         platformFeeBps = newFeeBps;
+
+        emit PlatformFeeUpdated(oldFee, newFeeBps);
     }
 
     /**

@@ -46,7 +46,7 @@ contract NFTMarketplace is ReentrancyGuard {
     uint256 public immutable platformFeeBps;
 
     // ============================================
-    // EVENTS
+    //                  EVENTS
     // ============================================
 
     event NFTTransferred(
@@ -65,10 +65,6 @@ contract NFTMarketplace is ReentrancyGuard {
         if (msg.sender != marketplaceCore) revert OnlyMarketplaceCore();
         _;
     }
-
-    // ============================================
-    //              CONSTRUCTOR
-    // ============================================
 
     /**
      * @notice Initialize NFT marketplace executor
@@ -91,7 +87,7 @@ contract NFTMarketplace is ReentrancyGuard {
     }
 
     // ============================================
-    //          CORE EXECUTION FUNCTION
+    //          EXTERNAL FUNCTION
     // ============================================
 
     /**
@@ -142,7 +138,7 @@ contract NFTMarketplace is ReentrancyGuard {
     }
 
     // ============================================
-    //        INTERNAL HELPER FUNCTIONS
+    //        INTERNAL FUNCTIONS
     // ============================================
 
     /**

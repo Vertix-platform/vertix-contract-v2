@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/**
- * @title IFeeDistributor
- * @notice Interface for payment distribution with fees and royalties
- * @dev Handles platform fees, royalties (ERC2981), and payment splits
- */
 interface IFeeDistributor {
-    // ============================================
-    //                 STRUCTS
-    // ============================================
-
-    /**
-     * @notice Payment distribution breakdown
-     */
     struct PaymentDistribution {
         uint256 platformFee;
         uint256 royaltyFee;
@@ -25,9 +13,6 @@ interface IFeeDistributor {
     //                 EVENTS
     // ============================================
 
-    /**
-     * @notice Emitted when payment is distributed
-     */
     event PaymentDistributed(
         address indexed seller,
         address indexed buyer,
@@ -37,24 +22,12 @@ interface IFeeDistributor {
         uint256 sellerNet
     );
 
-    /**
-     * @notice Emitted when platform fee is updated
-     */
     event PlatformFeeUpdated(uint256 oldFee, uint256 newFee);
 
-    /**
-     * @notice Emitted when fee collector is updated
-     */
     event FeeCollectorUpdated(address indexed oldCollector, address indexed newCollector);
 
-    /**
-     * @notice Emitted when fees are received by the distributor
-     */
     event FeesReceived(address indexed from, uint256 amount);
 
-    /**
-     * @notice Emitted when accumulated fees are withdrawn
-     */
     event FeesWithdrawn(address indexed collector, uint256 amount);
 
     // ============================================

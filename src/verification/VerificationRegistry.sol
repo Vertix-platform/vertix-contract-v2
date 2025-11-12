@@ -38,7 +38,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     //          STATE VARIABLES
     // ============================================
 
-    /// @notice Verification counter
     uint256 public verificationCounter;
 
     /// @notice Mapping from verification ID to verification data
@@ -56,20 +55,40 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     /// @notice Verification ID => owner address (reverse mapping for efficient lookups)
     mapping(uint256 => address) public verificationOwner;
 
-    /// @notice Whitelisted verifier addresses
     mapping(address => bool) public whitelistedVerifiers;
 
-    /// @notice Reference to role manager
     RoleManager public immutable roleManager;
 
-    // ============================================
-    //              CONSTRUCTOR
-    // ============================================
+    /// @notice Challenge period for user-submitted verifications (7 days)
+    uint256 public constant CHALLENGE_PERIOD = 7 days;
 
-    /**
-     * @notice Initialize verification registry
-     * @param _roleManager Address of role manager contract
-     */
+    /// @notice Minimum stake required to challenge a verification (0.01 ETH)
+    uint256 public constant CHALLENGE_STAKE = 0.01 ether;
+
+    /// @notice Mapping from verification ID to challenge data
+    mapping(uint256 => Challenge) public challenges;
+
+    /// @notice Pending user-submitted verifications (not yet approved)
+    mapping(uint256 => bool) public pendingVerifications;
+
+    uint256 public challengeCounter;
+
+    struct Challenge {
+        address challenger;
+        uint256 stake;
+        string evidence;
+        uint32 challengedAt;
+        ChallengeStatus status;
+    }
+
+    enum ChallengeStatus {
+        None,
+        Pending,
+        Approved, // Challenge approved - verification invalid
+        Rejected // Challenge rejected - verification valid
+
+    }
+
     constructor(address _roleManager) {
         if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         roleManager = RoleManager(_roleManager);
@@ -104,7 +123,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
             revert UnauthorizedVerifier(msg.sender);
         }
 
-        // Validate inputs
         if (owner == address(0)) revert InvalidOwner(owner);
         if (proofHash == bytes32(0)) revert InvalidProofHash();
         if (expiresAt <= block.timestamp) revert InvalidExpiration(expiresAt);
@@ -145,6 +163,187 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     }
 
     /**
+     * @notice Submit verification proof as a user (decentralized path)
+     * @param assetType Type of asset being verified
+     * @param proofHash SHA256 hash of verification data
+     * @param expiresAt Expiration timestamp
+     * @param metadataURI IPFS link to verification details and proof
+     * @return verificationId Unique identifier
+     * @dev User submits their own verification, enters challenge period
+     *      If no valid challenge in 7 days, automatically approved
+     */
+    function submitUserVerification(
+        AssetTypes.AssetType assetType,
+        bytes32 proofHash,
+        uint256 expiresAt,
+        string calldata metadataURI
+    )
+        external
+        nonReentrant
+        returns (uint256 verificationId)
+    {
+        if (proofHash == bytes32(0)) revert InvalidProofHash();
+        if (expiresAt <= block.timestamp + CHALLENGE_PERIOD) {
+            revert InvalidExpiration(expiresAt);
+        }
+        assetType.validateAssetType();
+
+        // Check if already verified for this asset type
+        uint256 existingId = ownerAssetVerification[msg.sender][assetType];
+        if (existingId != 0 && verifications[existingId].isActive) {
+            revert AlreadyVerified(msg.sender, assetType);
+        }
+
+        verificationCounter++;
+        verificationId = verificationCounter;
+
+        // Create verification (starts as pending)
+        verifications[verificationId] = Verification({
+            proofHash: proofHash,
+            verifier: msg.sender, // Self-verified
+            verifiedAt: uint32(block.timestamp),
+            expiresAt: uint32(expiresAt),
+            assetType: assetType,
+            isActive: false, // Not active until challenge period passes
+            verificationCount: 1
+        });
+
+        pendingVerifications[verificationId] = true;
+
+        verificationMetadata[verificationId] = metadataURI;
+
+        ownerVerifications[msg.sender].push(verificationId);
+        verificationOwner[verificationId] = msg.sender;
+
+        emit UserVerificationSubmitted(verificationId, msg.sender, assetType, proofHash, expiresAt, metadataURI);
+
+        return verificationId;
+    }
+
+    /**
+     * @notice Finalize user-submitted verification after challenge period
+     * @param verificationId Verification ID to finalize
+     * @dev Can be called by anyone after challenge period if no active challenges
+     */
+    function finalizeUserVerification(uint256 verificationId) external nonReentrant {
+        _validateVerificationExists(verificationId);
+
+        Verification storage verification = verifications[verificationId];
+
+        if (!pendingVerifications[verificationId]) {
+            revert VerificationNotPending(verificationId);
+        }
+
+        if (block.timestamp < verification.verifiedAt + CHALLENGE_PERIOD) {
+            revert ChallengePeriodNotEnded(verificationId);
+        }
+
+        // Check no active challenges
+        Challenge storage challenge = challenges[verificationId];
+        if (challenge.status == ChallengeStatus.Pending) {
+            revert VerificationHasActiveChallenge(verificationId);
+        }
+
+        // Activate verification
+        verification.isActive = true;
+        pendingVerifications[verificationId] = false;
+
+        address owner = _findOwner(verificationId);
+        ownerAssetVerification[owner][verification.assetType] = verificationId;
+
+        emit UserVerificationFinalized(verificationId, owner, verification.assetType);
+    }
+
+    /**
+     * @notice Challenge a pending user-submitted verification
+     * @param verificationId Verification ID to challenge
+     * @param evidence IPFS link or description of why verification is invalid
+     * @dev Requires CHALLENGE_STAKE to prevent spam
+     */
+    function challengeVerification(uint256 verificationId, string calldata evidence) external payable nonReentrant {
+        _validateVerificationExists(verificationId);
+
+        // Require stake
+        if (msg.value < CHALLENGE_STAKE) {
+            revert InsufficientChallengeStake(msg.value, CHALLENGE_STAKE);
+        }
+
+        Verification storage verification = verifications[verificationId];
+
+        // Must be pending
+        if (!pendingVerifications[verificationId]) {
+            revert VerificationNotPending(verificationId);
+        }
+
+        // Must be within challenge period
+        if (block.timestamp > verification.verifiedAt + CHALLENGE_PERIOD) {
+            revert ChallengePeriodEnded(verificationId);
+        }
+
+        // Check no existing challenge
+        if (challenges[verificationId].status == ChallengeStatus.Pending) {
+            revert VerificationAlreadyChallenged(verificationId);
+        }
+
+        // Create challenge
+        challenges[verificationId] = Challenge({
+            challenger: msg.sender,
+            stake: msg.value,
+            evidence: evidence,
+            challengedAt: uint32(block.timestamp),
+            status: ChallengeStatus.Pending
+        });
+
+        emit VerificationChallenged(verificationId, msg.sender, evidence, msg.value);
+    }
+
+    /**
+     * @notice Resolve a challenge (admin only)
+     * @param verificationId Verification ID with challenge
+     * @param approveChallenge True if challenge is valid, false if verification is legit
+     * @dev If challenge approved: verification revoked, stake returned
+     *      If challenge rejected: verification can be finalized, stake kept as penalty
+     */
+    function resolveChallenge(uint256 verificationId, bool approveChallenge) external nonReentrant {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+
+        _validateVerificationExists(verificationId);
+
+        Challenge storage challenge = challenges[verificationId];
+        Verification storage verification = verifications[verificationId];
+
+        // Must have pending challenge
+        if (challenge.status != ChallengeStatus.Pending) {
+            revert NoActiveChallenge(verificationId);
+        }
+
+        if (approveChallenge) {
+            // Challenge approved - verification is invalid
+            challenge.status = ChallengeStatus.Approved;
+            verification.isActive = false;
+            pendingVerifications[verificationId] = false;
+
+            // Return stake to challenger
+            (bool success,) = challenge.challenger.call{value: challenge.stake}("");
+            if (!success) {
+                revert Errors.TransferFailed(challenge.challenger, challenge.stake);
+            }
+
+            emit ChallengeResolved(verificationId, true, challenge.challenger);
+        } else {
+            // Challenge rejected - verification is valid
+            challenge.status = ChallengeStatus.Rejected;
+
+            // Stake is kept (transferred to fee distributor or burned)
+            // For now, keep in contract as protocol revenue
+
+            emit ChallengeResolved(verificationId, false, challenge.challenger);
+        }
+    }
+
+    /**
      * @notice Revoke a verification
      * @param verificationId Verification ID to revoke
      * @param reason Reason for revocation
@@ -172,7 +371,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         address owner = _findOwner(verificationId);
         if (owner != address(0)) {
             delete ownerAssetVerification[owner][verification.assetType];
-            // DON'T delete verificationOwner - we need it for renewal
         }
 
         emit VerificationRevoked(verificationId, owner, msg.sender, reason);
@@ -236,10 +434,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         emit VerificationRenewed(verificationId, owner, newExpiresAt, verification.verificationCount);
     }
 
-    // ============================================
-    //           ADMIN FUNCTIONS
-    // ============================================
-
     /**
      * @notice Add verifier to whitelist (admin only)
      * @param verifier Address to whitelist
@@ -279,7 +473,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     }
 
     // ============================================
-    //          INTERNAL HELPERS
+    //          INTERNAL FUNCTION
     // ============================================
 
     function _validateVerificationExists(uint256 verificationId) internal view {
@@ -300,12 +494,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     //             VIEW FUNCTIONS
     // ============================================
 
-    /**
-     * @notice Check if address is verified for asset type
-     * @param owner Asset owner
-     * @param assetType Type of asset
-     * @return True if has active, non-expired verification
-     */
     function isVerified(address owner, AssetTypes.AssetType assetType) external view returns (bool) {
         uint256 verificationId = ownerAssetVerification[owner][assetType];
 
@@ -316,24 +504,15 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         return verification.isActive && block.timestamp <= verification.expiresAt;
     }
 
-    /**
-     * @notice Get verification details
-     */
     function getVerification(uint256 verificationId) external view returns (Verification memory) {
         _validateVerificationExists(verificationId);
         return verifications[verificationId];
     }
 
-    /**
-     * @notice Get all verifications for an owner
-     */
     function getOwnerVerifications(address owner) external view returns (uint256[] memory) {
         return ownerVerifications[owner];
     }
 
-    /**
-     * @notice Get verification ID for owner + asset type
-     */
     function getVerificationByOwnerAndType(
         address owner,
         AssetTypes.AssetType assetType
@@ -345,9 +524,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
         return ownerAssetVerification[owner][assetType];
     }
 
-    /**
-     * @notice Check if verification is expired
-     */
     function isExpired(uint256 verificationId) external view returns (bool) {
         _validateVerificationExists(verificationId);
         return block.timestamp > verifications[verificationId].expiresAt;

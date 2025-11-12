@@ -3,19 +3,11 @@ pragma solidity ^0.8.24;
 
 import "./Errors.sol";
 
-/**
- * @title AssetTypes
- * @notice Library containing type definitions and constants for Vertix marketplace
- * @dev Provides enums, structs, and helper functions for asset categorization
- */
 library AssetTypes {
     // ============================================
     //                ENUMS
     // ============================================
 
-    /**
-     * @notice Asset categories supported by the marketplace
-     */
     enum AssetType {
         NFT721, // ERC-721 NFT
         NFT1155, // ERC-1155 NFT
@@ -33,9 +25,6 @@ library AssetTypes {
 
     }
 
-    /**
-     * @notice Escrow state machine
-     */
     enum EscrowState {
         None, // Default state (escrow doesn't exist)
         Active, // Funds locked, waiting for delivery
@@ -47,9 +36,6 @@ library AssetTypes {
 
     }
 
-    /**
-     * @notice Listing status
-     */
     enum ListingStatus {
         None, // Listing doesn't exist
         Active, // Listed and available for purchase
@@ -59,9 +45,6 @@ library AssetTypes {
 
     }
 
-    /**
-     * @notice Listing type
-     */
     enum ListingType {
         FixedPrice, // Standard fixed-price listing
         Auction, // English auction (ascending bid)
@@ -69,24 +52,18 @@ library AssetTypes {
 
     }
 
-    /**
-     * @notice Token standards for NFTs
-     */
     enum TokenStandard {
         ERC721, // Non-fungible token standard
         ERC1155 // Multi-token standard
 
     }
 
-    /**
-     * @notice Dispute status
-     */
     enum DisputeStatus {
         None, // No dispute
         Open, // Dispute opened, evidence collection phase
         UnderReview, // Admin reviewing evidence
         Resolved, // Dispute resolved by admin
-        Appealed // Decision appealed (future feature)
+        Appealed // Decision appealed
 
     }
 
@@ -158,10 +135,6 @@ library AssetTypes {
 
     /// @notice Maximum listing price (to prevent overflow issues)
     uint256 internal constant MAX_LISTING_PRICE = 1_000_000 ether;
-
-    // ============================================
-    //          HELPER FUNCTIONS
-    // ============================================
 
     /**
      * @notice Check if asset type is an NFT

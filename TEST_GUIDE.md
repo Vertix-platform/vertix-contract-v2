@@ -103,14 +103,6 @@ forge test --gas-report --match-contract YourContract
 forge test --watch
 ```
 
-
-
-### **Short-Term (Improve Coverage)**
-5. Add VerificationRegistry tests
-6. Add ReputationManager tests
-7. Add NFT contract tests
-8. Add integration tests
-
 ### **Long-Term (Advanced Testing)**
 9. Add invariant tests
 10. Add property-based tests

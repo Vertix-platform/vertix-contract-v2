@@ -53,10 +53,6 @@ contract NFTFactory is ReentrancyGuard {
 
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
 
-    // ============================================
-    //           CONSTRUCTOR
-    // ============================================
-
     constructor(address _roleManager) {
         if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         roleManager = RoleManager(_roleManager);
@@ -69,7 +65,7 @@ contract NFTFactory is ReentrancyGuard {
     }
 
     // ============================================
-    //          COLLECTION CREATION
+    //          EXTERNAL FUNCTIONS
     // ============================================
 
     /**
@@ -160,10 +156,6 @@ contract NFTFactory is ReentrancyGuard {
 
         return collection;
     }
-
-    // ============================================
-    //              ADMIN
-    // ============================================
 
     function setCreationFee(uint256 newFee) external {
         if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {

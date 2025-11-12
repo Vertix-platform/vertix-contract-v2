@@ -35,7 +35,6 @@ import {RoleManager} from "../access/RoleManager.sol";
  * Asset Types:
  * - NFTs: Instant atomic transfer when auction ends
  * - Off-chain assets: Automatic escrow creation buyer/seller
- * - Integration with FeeDistributor for payment distribution
  */
 contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Receiver, IERC1155Receiver {
     using PercentageMath for uint256;
@@ -74,17 +73,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
     /// @notice Emergency withdrawal delay (7 days after auction ends)
     uint256 public constant EMERGENCY_WITHDRAWAL_DELAY = 7 days;
 
-    // ============================================
-    //            CONSTRUCTOR
-    // ============================================
-
-    /**
-     * @notice Initialize auction manager
-     * @param _roleManager Address of role manager contract
-     * @param _feeDistributor Address of fee distributor contract
-     * @param _escrowManager Address of escrow manager contract
-     * @param _platformFeeBps Initial platform fee in basis points
-     */
     constructor(address _roleManager, address _feeDistributor, address _escrowManager, uint256 _platformFeeBps) {
         if (_roleManager == address(0)) {
             revert Errors.InvalidRoleManager();
@@ -103,10 +91,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         escrowManager = IEscrowManager(_escrowManager);
         platformFeeBps = _platformFeeBps;
     }
-
-    // ============================================
-    //          CORE FUNCTIONS
-    // ============================================
 
     /**
      * @notice Create a new auction for any asset type
@@ -139,13 +123,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         nonReentrant
         returns (uint256 auctionId)
     {
-        // Validate parameters
         AuctionLogic.validateAuctionParams(msg.sender, reservePrice, duration, bidIncrementBps);
 
-        // Validate asset type
         AssetTypes.validateAssetType(assetType);
 
-        // Asset-type specific validation
         if (AssetTypes.isNFTType(assetType)) {
             // NFT validation
             if (nftContract == address(0)) {
@@ -320,21 +301,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
     /**
      * @notice End auction and settle (transfer NFT, distribute payment)
      * @param auctionId Auction identifier
-     * @dev Can be called by anyone after auction ends (PERMISSIONLESS BY DESIGN)
-     *
-     * Security Note - Why Anyone Can Call:
-     * - Time-based protection: Must wait until auction.endTime (enforced by validateCanEnd)
-     * - State protection: Checks auction.active and !auction.settled
-     * - Benefits: Enables automated settlement, winner doesn't pay gas, no stuck auctions
-     * - No griefing risk: Early calls revert, late calls benefit all parties
-     *
-     * This permissionless design is intentional and follows best practices used by
-     * Foundation, Zora, and other major NFT auction platforms.
      */
     function endAuction(uint256 auctionId) external whenNotPaused nonReentrant {
         Auction storage auction = auctions[auctionId];
 
-        // Validate
         _validateAuctionExists(auctionId);
         if (!auction.active) {
             revert AuctionNotActive(auctionId);
@@ -389,14 +359,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
 
         // Route based on asset type
         if (AssetTypes.isNFTType(auction.assetType)) {
-            // NFT: Instant transfer + payment distribution
             _handleNFTAuctionEnd(auctionId, auction);
         } else {
-            // Off-chain asset: Create escrow
             _handleOffChainAuctionEnd(auctionId, auction);
         }
-
-        // Event emitted in helper functions
     }
 
     /**
@@ -480,23 +446,12 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
     /**
      * @notice Withdraw pending refunds (pull-over-push pattern)
      * @dev Allows users to withdraw funds that couldn't be automatically refunded
-     *
-     * DoS Protection:
-     * - Malicious bidders cannot block new bids by rejecting refunds
-     * - If immediate refund fails (contract reverts), funds are queued here
-     * - User can withdraw at their convenience
-     * - Follows OpenSea/Foundation pattern for maximum security
-     *
-     * Why This Matters:
-     * - Without this, a malicious contract could permanently lock an auction
-     * - Example: contract with `receive() { revert(); }` would block all future bids
-     * - This pattern ensures auctions can always continue regardless of bidder behavior
      */
     function withdraw() external nonReentrant {
         uint256 amount = pendingWithdrawals[msg.sender];
         if (amount == 0) revert NoPendingWithdrawal();
 
-        // Clear pending withdrawal before transfer (checks-effects-interactions)
+        // Clear pending withdrawal before transfer
         pendingWithdrawals[msg.sender] = 0;
 
         (bool success,) = msg.sender.call{value: amount}("");
@@ -508,10 +463,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
 
         emit Withdrawn(msg.sender, amount);
     }
-
-    // ============================================
-    //        ADMIN FUNCTIONS
-    // ============================================
 
     /**
      * @notice Update platform fee (FEE_MANAGER_ROLE only)
@@ -525,9 +476,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         platformFeeBps = newFeeBps;
     }
 
-    /**
-     * @notice Pause contract (PAUSER_ROLE only)
-     */
     function pause() external {
         if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
             revert Errors.NotPauser(msg.sender);
@@ -535,9 +483,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         _pause();
     }
 
-    /**
-     * @notice Unpause contract (ADMIN_ROLE only)
-     */
     function unpause() external {
         if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
             revert Errors.NotAdmin(msg.sender);
@@ -584,7 +529,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         // Calculate platform fee
         platformFee = amount.percentOf(platformFeeBps);
 
-        // Get royalty info (ERC-2981)
         (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(nftContract, tokenId, amount);
 
         // Calculate seller net
@@ -593,12 +537,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         // Transfer platform fee to fee distributor
         _safeTransfer(address(feeDistributor), platformFee);
 
-        // Transfer royalty if applicable
         if (royaltyFee > 0 && royaltyReceiver != address(0)) {
             _safeTransfer(royaltyReceiver, royaltyFee);
         }
 
-        // Transfer seller net
         _safeTransfer(seller, sellerNet);
 
         return (platformFee, royaltyFee, sellerNet, royaltyReceiver);
@@ -625,9 +567,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         }
     }
 
-    /**
-     * @notice Safe ETH transfer with proper error handling
-     */
     function _safeTransfer(address recipient, uint256 amount) internal {
         if (amount == 0) return;
         (bool success,) = recipient.call{value: amount}("");
@@ -686,7 +625,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
             auction.metadataURI
         );
 
-        // Emit auction ended event (no fees yet, will be handled in escrow)
         emit AuctionEnded(
             auctionId,
             auction.highestBidder,
@@ -697,9 +635,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
             0, // sellerNet - handled in escrow
             address(0)
         );
-
-        // Note: Seller must now deliver the asset and complete escrow process
-        // Buyer (winner) can confirm receipt or open dispute
     }
 
     /**
@@ -715,17 +650,11 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
     //        VIEW FUNCTIONS
     // ============================================
 
-    /**
-     * @notice Get auction details
-     */
     function getAuction(uint256 auctionId) external view returns (Auction memory) {
         _validateAuctionExists(auctionId);
         return auctions[auctionId];
     }
 
-    /**
-     * @notice Get minimum bid for an auction
-     */
     function getMinimumBid(uint256 auctionId) external view returns (uint256) {
         _validateAuctionExists(auctionId);
         Auction memory auction = auctions[auctionId];
@@ -738,9 +667,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         return AuctionLogic.calculateMinimumBid(auction.highestBid, auction.bidIncrementBps);
     }
 
-    /**
-     * @notice Check if auction is active (accepting bids)
-     */
     function isAuctionActive(uint256 auctionId) external view returns (bool) {
         if (auctionId == 0 || auctionId > auctionCounter) return false;
 
@@ -748,9 +674,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         return auction.active && AuctionLogic.isActive(auction.startTime, auction.endTime);
     }
 
-    /**
-     * @notice Check if auction has ended
-     */
     function hasAuctionEnded(uint256 auctionId) external view returns (bool) {
         if (auctionId == 0 || auctionId > auctionCounter) return false;
 
@@ -758,16 +681,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         return AuctionLogic.hasEnded(auction.endTime);
     }
 
-    /**
-     * @notice Get auctions created by seller
-     */
     function getSellerAuctions(address seller) external view returns (uint256[] memory) {
         return sellerAuctions[seller];
     }
 
-    /**
-     * @notice Get auctions where address is highest bidder
-     */
     function getBidderAuctions(address bidder) external view returns (uint256[] memory) {
         return bidderAuctions[bidder];
     }
@@ -797,9 +714,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         isValid = (expectedHash == actualHash);
     }
 
-    /**
-     * @notice Calculate payment distribution for an auction
-     */
     function calculatePaymentDistribution(uint256 auctionId)
         external
         view
@@ -818,22 +732,10 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         return (platformFee, royaltyFee, sellerNet, royaltyReceiver);
     }
 
-    // ============================================
-    //          NFT RECEIVER FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Handle the receipt of an ERC721 token
-     * @dev Required to receive ERC721 tokens via safeTransferFrom
-     */
     function onERC721Received(address, address, uint256, bytes calldata) external pure override returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
     }
 
-    /**
-     * @notice Handle the receipt of a single ERC1155 token type
-     * @dev Required to receive ERC1155 tokens via safeTransferFrom
-     */
     function onERC1155Received(
         address,
         address,
@@ -849,10 +751,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         return IERC1155Receiver.onERC1155Received.selector;
     }
 
-    /**
-     * @notice Handle the receipt of multiple ERC1155 token types
-     * @dev Required to receive ERC1155 tokens via safeBatchTransferFrom
-     */
     function onERC1155BatchReceived(
         address,
         address,
@@ -868,10 +766,6 @@ contract AuctionManager is IAuctionManager, ReentrancyGuard, Pausable, IERC721Re
         return IERC1155Receiver.onERC1155BatchReceived.selector;
     }
 
-    /**
-     * @notice Query if a contract implements an interface
-     * @dev Interface identification
-     */
     function supportsInterface(bytes4 interfaceId) external pure override returns (bool) {
         return interfaceId == type(IERC721Receiver).interfaceId || interfaceId == type(IERC1155Receiver).interfaceId;
     }

@@ -30,10 +30,6 @@ contract RoleManager is AccessControl, Pausable {
     error AlreadyHasRole(bytes32 role, address account);
     error LengthMismatch(uint256 rolesLength, uint256 accountsLength);
 
-    // ============================================
-    //             ROLES
-    // ============================================
-
     /// @notice General admin role for day-to-day operations
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
@@ -49,10 +45,6 @@ contract RoleManager is AccessControl, Pausable {
     /// @notice Can update platform fees and fee collector
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
 
-    // ============================================
-    //           STATE VARIABLES
-    // ============================================
-
     /// @notice Timelock duration for sensitive role changes (24 hours)
     uint256 public constant ROLE_CHANGE_TIMELOCK = 24 hours;
 
@@ -66,42 +58,18 @@ contract RoleManager is AccessControl, Pausable {
     //                 EVENTS
     // ============================================
 
-    /**
-     * @notice Emitted when a role grant is scheduled
-     */
     event RoleGrantScheduled(
         bytes32 indexed role, address indexed account, address indexed scheduler, uint256 executeAfter
     );
 
-    /**
-     * @notice Emitted when a scheduled role grant is executed
-     */
     event RoleGrantExecuted(bytes32 indexed role, address indexed account, address indexed executor);
 
-    /**
-     * @notice Emitted when a scheduled role grant is cancelled
-     */
     event RoleGrantCancelled(bytes32 indexed role, address indexed account, address indexed canceller);
 
-    /**
-     * @notice Emitted when contract is paused
-     */
     event EmergencyPaused(address indexed pauser, string reason);
 
-    /**
-     * @notice Emitted when contract is unpaused
-     */
     event EmergencyUnpaused(address indexed unpauser);
 
-    // ============================================
-    //             CONSTRUCTOR
-    // ============================================
-
-    /**
-     * @notice Initialize role manager
-     * @param initialAdmin Address to receive DEFAULT_ADMIN_ROLE
-     * @dev Grants all roles to initial admin for initial setup
-     */
     constructor(address initialAdmin) {
         if (initialAdmin == address(0)) {
             revert InvalidAddress(initialAdmin);
@@ -121,10 +89,6 @@ contract RoleManager is AccessControl, Pausable {
         roleMembers[PAUSER_ROLE].push(initialAdmin);
         roleMembers[FEE_MANAGER_ROLE].push(initialAdmin);
     }
-
-    // ============================================
-    //        ROLE MANAGEMENT WITH TIMELOCK
-    // ============================================
 
     /**
      * @notice Schedule a role grant with timelock (for sensitive roles)
@@ -242,10 +206,6 @@ contract RoleManager is AccessControl, Pausable {
         }
     }
 
-    // ============================================
-    //        EMERGENCY CONTROLS
-    // ============================================
-
     /**
      * @notice Pause all marketplace operations
      * @param reason Reason for pausing
@@ -324,10 +284,6 @@ contract RoleManager is AccessControl, Pausable {
     function isPaused() external view returns (bool) {
         return paused();
     }
-
-    // ============================================
-    //          UTILITY FUNCTIONS
-    // ============================================
 
     /**
      * @notice Batch grant roles to multiple addresses

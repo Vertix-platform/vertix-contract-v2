@@ -39,10 +39,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     error NotSeller();
     error InvalidNFTParameters();
 
-    // ============================================
-    //          STATE VARIABLES
-    // ============================================
-
     uint256 public listingCounter;
 
     mapping(uint256 => Listing) public listings;
@@ -53,9 +49,15 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     IEscrowManager public immutable escrowManager;
     INFTMarketplace public immutable nftMarketplace;
 
+    /// @notice Authorized contracts that can mark listings as sold
+    mapping(address => bool) public authorizedCallers;
+
     // ============================================
     //             EVENTS
     // ============================================
+
+    event AuthorizedCallerAdded(address indexed caller);
+    event AuthorizedCallerRemoved(address indexed caller);
 
     event NFTListingCreated(
         uint256 indexed listingId,
@@ -68,10 +70,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
 
     event PriceUpdated(uint256 indexed listingId, uint256 oldPrice, uint256 newPrice);
 
-    // ============================================
-    //           CONSTRUCTOR
-    // ============================================
-
     constructor(address _roleManager, address _escrowManager, address _nftMarketplace) {
         if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         if (_escrowManager == address(0)) revert Errors.InvalidEscrowManager();
@@ -83,10 +81,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         escrowManager = IEscrowManager(_escrowManager);
         nftMarketplace = INFTMarketplace(_nftMarketplace);
     }
-
-    // ============================================
-    //        LISTING FUNCTIONS
-    // ============================================
 
     /**
      * @notice Create NFT listing
@@ -189,7 +183,9 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         nonReentrant
         returns (uint256 listingId)
     {
-        if (price == 0) revert InvalidPrice();
+        if (price == 0 || price > AssetTypes.MAX_LISTING_PRICE) {
+            revert InvalidPrice();
+        }
         assetType.validateAssetType();
         if (assetType.isNFTType()) revert Errors.UseCreateNFTListing();
         if (assetHash == bytes32(0)) revert Errors.AssetHashRequired();
@@ -292,6 +288,39 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         emit PriceUpdated(listingId, oldPrice, newPrice);
     }
 
+    function addAuthorizedCaller(address caller) external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+        if (caller == address(0)) revert Errors.ZeroAddress();
+
+        authorizedCallers[caller] = true;
+        emit AuthorizedCallerAdded(caller);
+    }
+
+    function removeAuthorizedCaller(address caller) external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+
+        authorizedCallers[caller] = false;
+        emit AuthorizedCallerRemoved(caller);
+    }
+
+    function pause() external {
+        if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
+            revert Errors.NotPauser(msg.sender);
+        }
+        _pause();
+    }
+
+    function unpause() external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+        _unpause();
+    }
+
     // ============================================
     //            VIEW FUNCTIONS
     // ============================================
@@ -312,39 +341,21 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         return listings[listingId].assetType.isNFTType();
     }
 
-    /**
-     * @notice Mark listing as sold (called by OfferManager/AuctionManager)
-     * @param listingId Listing identifier
-     */
     function markListingAsSold(uint256 listingId) external {
+        if (!authorizedCallers[msg.sender]) {
+            revert Errors.NotAuthorized(msg.sender);
+        }
+
         Listing storage listing = listings[listingId];
 
-        // Only allow OfferManager or AuctionManager to call this
-        // In production, you'd store these addresses and check them
-        // For now, we'll mark as sold and emit event
+        if (listing.listingId == 0) {
+            revert ListingNotActive();
+        }
 
         if (listing.status != AssetTypes.ListingStatus.Active) {
             revert ListingNotActive();
         }
 
         listing.status = AssetTypes.ListingStatus.Sold;
-    }
-
-    // ============================================
-    //            ADMIN FUNCTIONS
-    // ============================================
-
-    function pause() external {
-        if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
-            revert Errors.NotPauser(msg.sender);
-        }
-        _pause();
-    }
-
-    function unpause() external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-        _unpause();
     }
 }

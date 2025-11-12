@@ -53,14 +53,6 @@ contract VertixNFT1155 is
      */
     uint256[44] private __gap;
 
-    // ============================================
-    //         CONSTRUCTOR & INITIALIZER
-    // ============================================
-
-    /**
-     * @notice Constructor for implementation contract (called once)
-     * @dev Disables initializers to prevent implementation from being initialized
-     */
     constructor() {
         _disableInitializers();
     }
@@ -108,10 +100,6 @@ contract VertixNFT1155 is
             _setDefaultRoyalty(royaltyReceiver_, royaltyFeeBps_);
         }
     }
-
-    // ============================================
-    //            MINTING
-    // ============================================
 
     function create(
         uint256 initialSupply,
@@ -177,10 +165,6 @@ contract VertixNFT1155 is
         emit TokenURIUpdated(tokenId, newuri);
     }
 
-    // ============================================
-    //             ROYALTY
-    // ============================================
-
     function setDefaultRoyalty(address receiver, uint96 feeBps) external onlyOwner {
         if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
             revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
@@ -195,10 +179,6 @@ contract VertixNFT1155 is
         }
         _setTokenRoyalty(tokenId, receiver, feeBps);
     }
-
-    // ============================================
-    //              ADMIN
-    // ============================================
 
     function pause() external onlyOwner {
         _pause();

@@ -34,6 +34,9 @@ contract ReputationManager is IReputationManager {
     /// @notice User address => reputation data
     mapping(address => Reputation) public reputations;
 
+    /// @notice Authorized contracts that can update reputation (e.g., MarketplaceCore, EscrowManager, AuctionManager)
+    mapping(address => bool) public authorizedContracts;
+
     /// @notice Reference to role manager
     RoleManager public immutable roleManager;
 
@@ -73,10 +76,10 @@ contract ReputationManager is IReputationManager {
     function updateReputation(address user, ReputationAction action) external {
         if (user == address(0)) revert Errors.InvalidUser();
 
-        // Only authorized contracts can update reputation
-        // In production, check msg.sender is authorized contract
-        bool isAuthorized = roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender) || msg.sender == address(this); // Allow internal calls
-        if (!isAuthorized) revert Errors.NotAuthorized(msg.sender);
+        // Only authorized contracts can update reputation (NOT admins to prevent manipulation)
+        if (!authorizedContracts[msg.sender]) {
+            revert Errors.NotAuthorized(msg.sender);
+        }
 
         Reputation storage rep = reputations[user];
 
@@ -154,6 +157,54 @@ contract ReputationManager is IReputationManager {
         rep.isBanned = false;
 
         emit UserUnbanned(user, msg.sender);
+    }
+
+    /**
+     * @notice Add authorized contract that can update reputations
+     * @param contractAddress Contract to authorize (e.g., MarketplaceCore, EscrowManager, AuctionManager)
+     * @dev Only admin can add authorized contracts
+     */
+    function addAuthorizedContract(address contractAddress) external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+        if (contractAddress == address(0)) {
+            revert Errors.ZeroAddress();
+        }
+        if (authorizedContracts[contractAddress]) {
+            revert Errors.AlreadyAuthorized(contractAddress);
+        }
+
+        authorizedContracts[contractAddress] = true;
+
+        emit AuthorizedContractAdded(contractAddress, msg.sender);
+    }
+
+    /**
+     * @notice Remove authorized contract
+     * @param contractAddress Contract to deauthorize
+     * @dev Only admin can remove authorized contracts
+     */
+    function removeAuthorizedContract(address contractAddress) external {
+        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
+            revert Errors.NotAdmin(msg.sender);
+        }
+        if (!authorizedContracts[contractAddress]) {
+            revert Errors.NotAuthorized(contractAddress);
+        }
+
+        authorizedContracts[contractAddress] = false;
+
+        emit AuthorizedContractRemoved(contractAddress, msg.sender);
+    }
+
+    /**
+     * @notice Check if contract is authorized to update reputations
+     * @param contractAddress Contract to check
+     * @return True if authorized
+     */
+    function isAuthorizedContract(address contractAddress) external view returns (bool) {
+        return authorizedContracts[contractAddress];
     }
 
     // ============================================
