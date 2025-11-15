@@ -22,8 +22,8 @@ contract MockEscrowManager {
         address seller,
         AssetTypes.AssetType assetType,
         uint256 duration,
-        bytes32 assetHash,
-        string calldata metadataURI
+        bytes32, /* assetHash */
+        string calldata /* metadataURI */
     )
         external
         payable

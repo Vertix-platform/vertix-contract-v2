@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "../interfaces/IEscrowManager.sol";
-import "../libraries/AssetTypes.sol";
-import "../libraries/PercentageMath.sol";
-import "../libraries/EscrowLogic.sol";
-import "../libraries/Errors.sol";
-import "../access/RoleManager.sol";
-import "../core/FeeDistributor.sol";
+import {IEscrowManager} from "../interfaces/IEscrowManager.sol";
+import {AssetTypes} from "../libraries/AssetTypes.sol";
+import {PercentageMath} from "../libraries/PercentageMath.sol";
+import {EscrowLogic} from "../libraries/EscrowLogic.sol";
+import {Errors} from "../libraries/Errors.sol";
+import {PaymentUtils} from "../libraries/PaymentUtils.sol";
+import {FeeDistributor} from "../core/FeeDistributor.sol";
+import {BaseMarketplaceContract} from "../base/BaseMarketplaceContract.sol";
 
 /**
  * @title EscrowManager
@@ -23,24 +22,16 @@ import "../core/FeeDistributor.sol";
  * 4. Buyer has verification period to test asset
  * 5. Buyer confirms receipt OR deadline passes → Funds released
  * 6. Either party can dispute → Admin resolution
- *
- * Security Features:
- * - Time-locked releases (7/30/60/90 day options)
- * - Buyer verification period (50% of duration)
- * - Dispute mechanism with evidence submission
- * - Admin resolution for disputes
- * - Cancellation with compensation for seller if work done
  */
-contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
+contract EscrowManager is IEscrowManager, BaseMarketplaceContract {
     using PercentageMath for uint256;
     using EscrowLogic for *;
     using AssetTypes for AssetTypes.AssetType;
 
     // ============================================
-    // STATE VARIABLES
+    //              STATE VARIABLES
     // ============================================
 
-    /// @notice Escrow counter for unique IDs
     uint256 public escrowCounter;
 
     /// @notice Mapping from escrow ID to escrow data
@@ -55,44 +46,29 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     /// @notice Seller address => array of escrow IDs
     mapping(address => uint256[]) public sellerEscrows;
 
-    /// @notice Platform fee in basis points
     uint256 public platformFeeBps;
 
     /// @notice Authorized marketplace contracts that can create escrows on behalf of buyers
     mapping(address => bool) public authorizedMarketplaces;
 
-    /// @notice Reference to role manager
-    RoleManager public immutable roleManager;
-
-    /// @notice Reference to fee distributor
     FeeDistributor public immutable feeDistributor;
 
-    // ============================================
-    // CONSTRUCTOR
-    // ============================================
-
-    /**
-     * @notice Initialize escrow manager
-     * @param _roleManager Address of role manager contract
-     * @param _feeDistributor Address of fee distributor contract
-     * @param _platformFeeBps Initial platform fee in basis points
-     */
-    constructor(address _roleManager, address _feeDistributor, uint256 _platformFeeBps) {
-        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
+    constructor(
+        address _roleManager,
+        address _feeDistributor,
+        uint256 _platformFeeBps
+    )
+        BaseMarketplaceContract(_roleManager)
+    {
         if (_feeDistributor == address(0)) {
             revert Errors.InvalidFeeDistributor();
         }
 
         PercentageMath.validateBps(_platformFeeBps, AssetTypes.MAX_FEE_BPS);
 
-        roleManager = RoleManager(_roleManager);
         feeDistributor = FeeDistributor(payable(_feeDistributor));
         platformFeeBps = _platformFeeBps;
     }
-
-    // ============================================
-    // CORE FUNCTIONS
-    // ============================================
 
     /**
      * @notice Create a new escrow for digital asset purchase
@@ -118,40 +94,31 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         nonReentrant
         returns (uint256 escrowId)
     {
-        // Validate buyer and seller are different
         if (buyer == seller) revert Errors.BuyerCannotBeSeller();
 
-        // BUYER VALIDATION: Ensure msg.sender is either the buyer or an authorized marketplace
-        // This prevents arbitrary addresses from being set as buyer without their consent
         if (msg.sender != buyer && !authorizedMarketplaces[msg.sender]) {
             revert Errors.UnauthorizedEscrowCreation(msg.sender, buyer);
         }
 
-        // Validate inputs
         EscrowLogic.validateEscrowParams(buyer, seller, msg.value, duration);
         EscrowLogic.validateHash(assetHash);
         EscrowLogic.validateMetadataURI(metadataURI);
         assetType.validateAssetType();
 
-        // Ensure asset type requires escrow
         if (!assetType.requiresEscrow()) {
             revert Errors.AssetTypeDoesNotRequireEscrow();
         }
 
-        // Validate amount is reasonable for asset type
         if (!EscrowLogic.isReasonableAmount(msg.value, assetType)) {
             revert Errors.InsufficientPayment(msg.value, 0);
         }
 
-        // Increment counter
         escrowCounter++;
         escrowId = escrowCounter;
 
-        // Calculate deadlines
         (uint256 releaseTime, uint256 verificationDeadline, uint256 disputeDeadline) =
             EscrowLogic.calculateDeadlines(duration);
 
-        // Create escrow (storage optimized)
         escrows[escrowId] = Escrow({
             buyer: buyer,
             amount: uint96(msg.value),
@@ -168,10 +135,8 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
             assetHash: assetHash
         });
 
-        // Store metadata
         escrowMetadata[escrowId] = metadataURI;
 
-        // Track escrows by user
         buyerEscrows[buyer].push(escrowId);
         sellerEscrows[seller].push(escrowId);
 
@@ -188,21 +153,17 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     function markAssetDelivered(uint256 escrowId) external whenNotPaused nonReentrant {
         Escrow storage escrow = escrows[escrowId];
 
-        // Validate escrow exists and is active
         _validateEscrowExists(escrowId);
         _requireEscrowState(escrow, AssetTypes.EscrowState.Active);
 
-        // Only seller can mark delivered
         if (msg.sender != escrow.seller) {
             revert UnauthorizedCaller(msg.sender, escrow.seller);
         }
 
-        // Check not already delivered
         if (escrow.sellerDelivered) {
             revert EscrowAlreadyDelivered(escrowId);
         }
 
-        // Update state
         escrow.state = AssetTypes.EscrowState.Delivered;
         escrow.sellerDelivered = true;
 
@@ -217,31 +178,25 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     function confirmAssetReceived(uint256 escrowId) external whenNotPaused nonReentrant {
         Escrow storage escrow = escrows[escrowId];
 
-        // Validate
         _validateEscrowExists(escrowId);
         _requireEscrowState(escrow, AssetTypes.EscrowState.Delivered);
 
-        // Only buyer can confirm
         if (msg.sender != escrow.buyer) {
             revert UnauthorizedCaller(msg.sender, escrow.buyer);
         }
 
-        // Check seller delivered
         if (!escrow.sellerDelivered) {
             revert EscrowNotDelivered(escrowId);
         }
 
-        // Check not already confirmed
         if (escrow.buyerConfirmed) {
             revert EscrowAlreadyConfirmed(escrowId);
         }
 
-        // Mark confirmed
         escrow.buyerConfirmed = true;
 
         emit AssetReceiptConfirmed(escrowId, msg.sender, block.timestamp);
 
-        // Trigger release
         _releaseEscrow(escrowId);
     }
 
@@ -253,20 +208,16 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     function releaseEscrow(uint256 escrowId) external whenNotPaused nonReentrant {
         Escrow storage escrow = escrows[escrowId];
 
-        // Validate
         _validateEscrowExists(escrowId);
 
-        // Must be in Active or Delivered state
         if (escrow.state != AssetTypes.EscrowState.Active && escrow.state != AssetTypes.EscrowState.Delivered) {
             revert EscrowNotActive(escrowId, escrow.state);
         }
 
-        // Check not in dispute
         if (escrow.state == AssetTypes.EscrowState.Disputed) {
             revert EscrowInDispute(escrowId);
         }
 
-        // Check if releasable
         bool canRelease = EscrowLogic.canRelease(escrow.buyerConfirmed, escrow.sellerDelivered, escrow.releaseTime);
 
         if (!canRelease) {
@@ -276,26 +227,19 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         _releaseEscrow(escrowId);
     }
 
-    /**
-     * @notice Internal function to release escrow
-     */
     function _releaseEscrow(uint256 escrowId) internal {
         Escrow storage escrow = escrows[escrowId];
 
-        // Update state
         escrow.state = AssetTypes.EscrowState.Completed;
 
         uint256 amount = uint256(escrow.amount);
 
-        // Calculate fees
         uint256 platformFee = amount.percentOf(platformFeeBps);
         uint256 sellerNet = amount - platformFee;
 
-        // Transfer to seller
         (bool success,) = escrow.seller.call{value: sellerNet}("");
         if (!success) revert Errors.SellerTransferFailed();
 
-        // Transfer platform fee to fee distributor (will accumulate there)
         (bool feeSuccess,) = address(feeDistributor).call{value: platformFee}("");
         if (!feeSuccess) revert Errors.FeeTransferFailed();
 
@@ -310,25 +254,20 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     function openDispute(uint256 escrowId, string calldata reason) external whenNotPaused nonReentrant {
         Escrow storage escrow = escrows[escrowId];
 
-        // Validate
         _validateEscrowExists(escrowId);
 
-        // Must be buyer or seller
         if (msg.sender != escrow.buyer && msg.sender != escrow.seller) {
             revert Errors.NotAuthorized(msg.sender);
         }
 
-        // Must be in active state (not completed/cancelled)
         if (escrow.state != AssetTypes.EscrowState.Active && escrow.state != AssetTypes.EscrowState.Delivered) {
             revert EscrowNotActive(escrowId, escrow.state);
         }
 
-        // Check dispute deadline
         if (block.timestamp > escrow.disputeDeadline) {
             revert DisputeDeadlinePassed(escrowId);
         }
 
-        // Update state
         EscrowLogic.validateStateTransition(escrow.state, AssetTypes.EscrowState.Disputed);
         escrow.state = AssetTypes.EscrowState.Disputed;
 
@@ -342,40 +281,33 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
      * @param amount Amount to award (can be partial split)
      */
     function resolveDispute(uint256 escrowId, address winner, uint256 amount) external whenNotPaused nonReentrant {
-        // Only arbitrator role can resolve
         if (!roleManager.hasRole(roleManager.ARBITRATOR_ROLE(), msg.sender)) {
             revert Errors.NotAuthorized(msg.sender);
         }
 
         Escrow storage escrow = escrows[escrowId];
 
-        // Validate
         _validateEscrowExists(escrowId);
         _requireEscrowState(escrow, AssetTypes.EscrowState.Disputed);
 
-        // Winner must be buyer or seller
         if (winner != escrow.buyer && winner != escrow.seller) {
             revert Errors.NotAuthorized(winner);
         }
 
-        // Amount can't exceed escrow amount
         uint256 escrowAmount = uint256(escrow.amount);
         if (amount > escrowAmount) {
             revert InvalidDisputeResolution(amount, escrowAmount);
         }
 
-        // Update state
         if (winner == escrow.buyer) {
             escrow.state = AssetTypes.EscrowState.Refunded;
         } else {
             escrow.state = AssetTypes.EscrowState.Completed;
         }
 
-        // Transfer to winner
         (bool success,) = winner.call{value: amount}("");
         if (!success) revert Errors.WinnerTransferFailed();
 
-        // If partial resolution, transfer remainder to other party
         if (amount < escrowAmount) {
             address otherParty = winner == escrow.buyer ? escrow.seller : escrow.buyer;
             uint256 remainder = escrowAmount - amount;
@@ -395,49 +327,35 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     function cancelEscrow(uint256 escrowId) external whenNotPaused nonReentrant {
         Escrow storage escrow = escrows[escrowId];
 
-        // Validate
         _validateEscrowExists(escrowId);
         _requireEscrowState(escrow, AssetTypes.EscrowState.Active);
 
-        // Check if can cancel
         bool canCancel = EscrowLogic.canCancel(escrow.sellerDelivered, msg.sender, escrow.buyer);
 
         if (!canCancel) revert Errors.CannotCancelEscrow();
 
-        // Calculate refund amounts
         uint256 escrowAmount = uint256(escrow.amount);
         (uint256 buyerRefund, uint256 sellerCompensation) =
             EscrowLogic.calculateCancellationFees(escrowAmount, escrow.sellerDelivered);
 
-        // Update state
         escrow.state = AssetTypes.EscrowState.Cancelled;
 
-        // Transfer compensation to seller if delivered
         if (sellerCompensation > 0) {
             (bool successSeller,) = escrow.seller.call{value: sellerCompensation}("");
             if (!successSeller) revert Errors.SellerCompensationFailed();
         }
 
-        // Refund buyer
         (bool successBuyer,) = escrow.buyer.call{value: buyerRefund}("");
         if (!successBuyer) revert Errors.BuyerRefundFailed();
 
         emit EscrowCancelled(escrowId, escrow.buyer, buyerRefund, sellerCompensation);
     }
 
-    // ============================================
-    // ADMIN FUNCTIONS
-    // ============================================
-
     /**
      * @notice Update platform fee (FEE_MANAGER_ROLE only)
      * @param newFeeBps New fee in basis points
      */
-    function updatePlatformFee(uint256 newFeeBps) external {
-        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
-            revert Errors.NotFeeManager(msg.sender);
-        }
-
+    function updatePlatformFee(uint256 newFeeBps) external onlyFeeManager {
         PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
 
         uint256 oldFee = platformFeeBps;
@@ -447,34 +365,11 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Pause contract (PAUSER_ROLE only)
-     */
-    function pause() external {
-        if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
-            revert Errors.NotPauser(msg.sender);
-        }
-        _pause();
-    }
-
-    /**
-     * @notice Unpause contract (ADMIN_ROLE only)
-     */
-    function unpause() external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-        _unpause();
-    }
-
-    /**
      * @notice Add authorized marketplace contract
      * @param marketplace Address of marketplace contract to authorize
      * @dev Only admin can authorize marketplaces to create escrows on behalf of buyers
      */
-    function addAuthorizedMarketplace(address marketplace) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
+    function addAuthorizedMarketplace(address marketplace) external onlyAdmin {
         if (marketplace == address(0)) {
             revert Errors.ZeroAddress();
         }
@@ -492,10 +387,7 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
      * @param marketplace Address of marketplace contract to deauthorize
      * @dev Only admin can remove marketplace authorization
      */
-    function removeAuthorizedMarketplace(address marketplace) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
+    function removeAuthorizedMarketplace(address marketplace) external onlyAdmin {
         if (!authorizedMarketplaces[marketplace]) {
             revert Errors.NotAuthorized(marketplace);
         }
@@ -505,43 +397,8 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         emit MarketplaceDeauthorized(marketplace, msg.sender);
     }
 
-    /**
-     * @notice Check if marketplace is authorized
-     * @param marketplace Address to check
-     * @return True if authorized
-     */
-    function isAuthorizedMarketplace(address marketplace) external view returns (bool) {
-        return authorizedMarketplaces[marketplace];
-    }
-
     // ============================================
-    // VIEW FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Get escrow details
-     */
-    function getEscrow(uint256 escrowId) external view returns (Escrow memory) {
-        _validateEscrowExists(escrowId);
-        return escrows[escrowId];
-    }
-
-    /**
-     * @notice Get all escrows for a buyer
-     */
-    function getBuyerEscrows(address buyer) external view returns (uint256[] memory) {
-        return buyerEscrows[buyer];
-    }
-
-    /**
-     * @notice Get all escrows for a seller
-     */
-    function getSellerEscrows(address seller) external view returns (uint256[] memory) {
-        return sellerEscrows[seller];
-    }
-
-    // ============================================
-    // INTERNAL HELPERS
+    //             INTERNAL FUNCTIONS
     // ============================================
 
     function _validateEscrowExists(uint256 escrowId) internal view {
@@ -554,5 +411,26 @@ contract EscrowManager is IEscrowManager, ReentrancyGuard, Pausable {
         if (escrow.state != requiredState) {
             revert EscrowNotActive(0, escrow.state);
         }
+    }
+
+    // ============================================
+    //              VIEW FUNCTIONS
+    // ============================================
+
+    function isAuthorizedMarketplace(address marketplace) external view returns (bool) {
+        return authorizedMarketplaces[marketplace];
+    }
+
+    function getEscrow(uint256 escrowId) external view returns (Escrow memory) {
+        _validateEscrowExists(escrowId);
+        return escrows[escrowId];
+    }
+
+    function getBuyerEscrows(address buyer) external view returns (uint256[] memory) {
+        return buyerEscrows[buyer];
+    }
+
+    function getSellerEscrows(address seller) external view returns (uint256[] memory) {
+        return sellerEscrows[seller];
     }
 }

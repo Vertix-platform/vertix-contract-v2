@@ -14,7 +14,6 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 // Mock contracts
 import {MockNFT} from "../mocks/MockNFT.sol";
 import {MockNFTRevert} from "../mocks/MockNFTRevert.sol";
-import {MaliciousReceiver} from "../mocks/MaliciousReceiver.sol";
 
 contract FeeDistributorTest is Test {
     FeeDistributor public feeDistributor;

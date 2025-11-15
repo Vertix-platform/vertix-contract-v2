@@ -49,6 +49,9 @@ library Errors {
     /// @notice Caller is not a pauser
     error NotPauser(address caller);
 
+    /// @notice Caller is not a verifier
+    error NotVerifier(address caller);
+
     /// @notice Caller is not authorized for this action
     error NotAuthorized(address caller);
 

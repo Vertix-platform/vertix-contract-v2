@@ -9,6 +9,7 @@ import {VertixNFT721} from "../../src/nft/VertixNFT721.sol";
 import {VertixNFT1155} from "../../src/nft/VertixNFT1155.sol";
 import {AssetTypes} from "../../src/libraries/AssetTypes.sol";
 import {Errors} from "../../src/libraries/Errors.sol";
+import {NFTOperations} from "../../src/libraries/NFTOperations.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -206,7 +207,9 @@ contract NFTMarketplaceTest is Test {
         address fakeSeller = makeAddr("fakeSeller");
 
         vm.prank(marketplaceCore);
-        vm.expectRevert(NFTMarketplace.InsufficientOwnership.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(NFTOperations.InvalidNFTOwner.selector, address(nft721), tokenId, fakeSeller, seller)
+        );
         marketplace.executePurchase{value: price}(
             buyer, fakeSeller, address(nft721), tokenId, 1, AssetTypes.TokenStandard.ERC721
         );
@@ -219,7 +222,9 @@ contract NFTMarketplaceTest is Test {
         // No approval given
 
         vm.prank(marketplaceCore);
-        vm.expectRevert(NFTMarketplace.NotApproved.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(NFTOperations.NFTNotApproved.selector, address(nft721), seller, address(marketplace))
+        );
         marketplace.executePurchase{value: price}(
             buyer, seller, address(nft721), tokenId, 1, AssetTypes.TokenStandard.ERC721
         );
@@ -304,7 +309,11 @@ contract NFTMarketplaceTest is Test {
         nft1155.setApprovalForAll(address(marketplace), true);
 
         vm.prank(marketplaceCore);
-        vm.expectRevert(NFTMarketplace.InsufficientOwnership.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NFTOperations.InvalidNFTOwner.selector, address(nft1155), tokenId, seller, address(0)
+            )
+        );
         marketplace.executePurchase{value: price}(
             buyer, seller, address(nft1155), tokenId, quantity, AssetTypes.TokenStandard.ERC1155
         );
@@ -318,7 +327,11 @@ contract NFTMarketplaceTest is Test {
         // No approval given
 
         vm.prank(marketplaceCore);
-        vm.expectRevert(NFTMarketplace.NotApproved.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NFTOperations.NFTNotApproved.selector, address(nft1155), seller, address(marketplace)
+            )
+        );
         marketplace.executePurchase{value: price}(
             buyer, seller, address(nft1155), tokenId, quantity, AssetTypes.TokenStandard.ERC1155
         );
@@ -559,7 +572,9 @@ contract NFTMarketplaceTest is Test {
 
         // Trying to buy already sold NFT should fail (ownership check)
         vm.prank(marketplaceCore);
-        vm.expectRevert(NFTMarketplace.InsufficientOwnership.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(NFTOperations.InvalidNFTOwner.selector, address(nft721), tokenId, seller, buyer)
+        );
         marketplace.executePurchase{value: price}(
             buyer, seller, address(nft721), tokenId, 1, AssetTypes.TokenStandard.ERC721
         );

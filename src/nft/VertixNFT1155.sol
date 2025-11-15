@@ -12,6 +12,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 import {Errors} from "../libraries/Errors.sol";
+import {RoyaltyValidator} from "../libraries/RoyaltyValidator.sol";
 
 /**
  * @title VertixNFT1155
@@ -72,17 +73,8 @@ contract VertixNFT1155 is
         external
         initializer
     {
-        // Validate creator
-        if (creator_ == address(0)) revert Errors.InvalidCreator();
-
-        // Validate royalty
-        if (royaltyFeeBps_ > AssetTypes.MAX_ROYALTY_BPS) {
-            revert Errors.RoyaltyTooHigh(royaltyFeeBps_, AssetTypes.MAX_ROYALTY_BPS);
-        }
-
-        if (royaltyFeeBps_ > 0 && royaltyReceiver_ == address(0)) {
-            revert Errors.InvalidRoyaltyReceiver();
-        }
+        // Validate initialization parameters
+        RoyaltyValidator.validateInitialization(creator_, royaltyReceiver_, royaltyFeeBps_);
 
         // Initialize parent contracts
         __ERC1155_init(uri_);
@@ -166,9 +158,7 @@ contract VertixNFT1155 is
     }
 
     function setDefaultRoyalty(address receiver, uint96 feeBps) external onlyOwner {
-        if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
-            revert Errors.RoyaltyTooHigh(feeBps, AssetTypes.MAX_ROYALTY_BPS);
-        }
+        RoyaltyValidator.validateRoyaltyFee(feeBps);
         _setDefaultRoyalty(receiver, feeBps);
         emit RoyaltyUpdated(receiver, feeBps);
     }

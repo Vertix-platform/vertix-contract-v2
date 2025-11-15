@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IVerificationRegistry.sol";
 import "../libraries/AssetTypes.sol";
 import "../libraries/Errors.sol";
-import "../access/RoleManager.sol";
+import "../base/BaseMarketplaceContract.sol";
 
 /**
  * @title VerificationRegistry
@@ -31,7 +30,7 @@ import "../access/RoleManager.sol";
  * - Websites (domain ownership via DNS, traffic)
  * - Domains (WHOIS verification)
  */
-contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
+contract VerificationRegistry is IVerificationRegistry, BaseMarketplaceContract {
     using AssetTypes for AssetTypes.AssetType;
 
     // ============================================
@@ -56,8 +55,6 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
     mapping(uint256 => address) public verificationOwner;
 
     mapping(address => bool) public whitelistedVerifiers;
-
-    RoleManager public immutable roleManager;
 
     /// @notice Challenge period for user-submitted verifications (7 days)
     uint256 public constant CHALLENGE_PERIOD = 7 days;
@@ -89,10 +86,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
 
     }
 
-    constructor(address _roleManager) {
-        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
-        roleManager = RoleManager(_roleManager);
-    }
+    constructor(address _roleManager) BaseMarketplaceContract(_roleManager) {}
 
     // ============================================
     //            ETERNAL FUNCTIONS
@@ -304,11 +298,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @dev If challenge approved: verification revoked, stake returned
      *      If challenge rejected: verification can be finalized, stake kept as penalty
      */
-    function resolveChallenge(uint256 verificationId, bool approveChallenge) external nonReentrant {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-
+    function resolveChallenge(uint256 verificationId, bool approveChallenge) external onlyAdmin nonReentrant {
         _validateVerificationExists(verificationId);
 
         Challenge storage challenge = challenges[verificationId];
@@ -438,11 +428,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @notice Add verifier to whitelist (admin only)
      * @param verifier Address to whitelist
      */
-    function addVerifier(address verifier) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-
+    function addVerifier(address verifier) external onlyAdmin {
         if (verifier == address(0)) revert Errors.InvalidVerifier();
 
         if (whitelistedVerifiers[verifier]) {
@@ -458,11 +444,7 @@ contract VerificationRegistry is IVerificationRegistry, ReentrancyGuard {
      * @notice Remove verifier from whitelist (admin only)
      * @param verifier Address to remove
      */
-    function removeVerifier(address verifier) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-
+    function removeVerifier(address verifier) external onlyAdmin {
         if (!whitelistedVerifiers[verifier]) {
             revert VerifierNotWhitelisted(verifier);
         }

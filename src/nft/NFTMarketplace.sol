@@ -3,11 +3,12 @@ pragma solidity ^0.8.24;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 import {PercentageMath} from "../libraries/PercentageMath.sol";
 import {Errors} from "../libraries/Errors.sol";
+import {NFTOperations} from "../libraries/NFTOperations.sol";
+import {PaymentUtils} from "../libraries/PaymentUtils.sol";
 import {FeeDistributor} from "../core/FeeDistributor.sol";
 
 /**
@@ -117,108 +118,28 @@ contract NFTMarketplace is ReentrancyGuard {
 
         uint256 price = msg.value;
 
+        // Validate ownership and approval
+        NFTOperations.validateOwnership(nftContract, tokenId, seller, quantity, standard);
+        NFTOperations.validateApprovalWithTokenId(nftContract, seller, address(this), tokenId, standard);
+
         // Calculate fees
         uint256 platformFee = price.percentOf(platformFeeBps);
-        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(nftContract, tokenId, price);
+        (address royaltyReceiver, uint256 royaltyAmount) = NFTOperations.getRoyaltyInfo(nftContract, tokenId, price);
         uint256 sellerNet = price - platformFee - royaltyAmount;
 
         // Transfer NFT (Checks-Effects-Interactions)
-        _transferNFT(nftContract, seller, buyer, tokenId, quantity, standard);
+        NFTOperations.transferNFT(nftContract, seller, buyer, tokenId, quantity, standard);
 
         // Distribute payment
-        _sendPayment(seller, sellerNet);
-        _sendPayment(address(feeDistributor), platformFee);
+        PaymentUtils.safeTransferETH(seller, sellerNet);
+        PaymentUtils.safeTransferETH(address(feeDistributor), platformFee);
         if (royaltyAmount > 0) {
-            _sendPayment(royaltyReceiver, royaltyAmount);
+            PaymentUtils.safeTransferETH(royaltyReceiver, royaltyAmount);
         }
 
         // Emit events
         emit NFTTransferred(nftContract, tokenId, seller, buyer, quantity);
         emit PaymentDistributed(seller, sellerNet, platformFee, royaltyReceiver, royaltyAmount);
-    }
-
-    // ============================================
-    //        INTERNAL FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Transfer NFT from seller to buyer
-     * @dev Reverts if seller doesn't own NFT or hasn't approved marketplace
-     */
-    function _transferNFT(
-        address nftContract,
-        address from,
-        address to,
-        uint256 tokenId,
-        uint256 quantity,
-        AssetTypes.TokenStandard standard
-    )
-        internal
-    {
-        if (standard == AssetTypes.TokenStandard.ERC721) {
-            // Verify ownership
-            if (IERC721(nftContract).ownerOf(tokenId) != from) {
-                revert InsufficientOwnership();
-            }
-
-            // Check approval (this contract needs approval to transfer)
-            address approved = IERC721(nftContract).getApproved(tokenId);
-            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(from, address(this));
-            if (approved != address(this) && !isApprovedForAll) {
-                revert NotApproved();
-            }
-
-            // Transfer
-            IERC721(nftContract).safeTransferFrom(from, to, tokenId);
-        } else {
-            // ERC1155
-            uint256 balance = IERC1155(nftContract).balanceOf(from, tokenId);
-            if (balance < quantity) {
-                revert InsufficientOwnership();
-            }
-
-            // Check approval (this contract needs approval to transfer)
-            if (!IERC1155(nftContract).isApprovedForAll(from, address(this))) {
-                revert NotApproved();
-            }
-
-            // Transfer
-            IERC1155(nftContract).safeTransferFrom(from, to, tokenId, quantity, "");
-        }
-    }
-
-    /**
-     * @notice Get royalty info from ERC-2981 contract
-     * @dev Returns (address(0), 0) if not supported or reverts
-     */
-    function _getRoyaltyInfo(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    )
-        internal
-        view
-        returns (address receiver, uint256 royaltyAmount)
-    {
-        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (address _receiver, uint256 _amount) {
-            // Cap royalty at maximum allowed
-            uint256 maxRoyalty = salePrice.percentOf(AssetTypes.MAX_ROYALTY_BPS);
-            if (_amount > maxRoyalty) _amount = maxRoyalty;
-            return (_receiver, _amount);
-        } catch {
-            return (address(0), 0);
-        }
-    }
-
-    /**
-     * @notice Send ETH payment safely
-     * @dev Reverts if transfer fails
-     */
-    function _sendPayment(address recipient, uint256 amount) internal {
-        if (amount == 0) return;
-
-        (bool success,) = recipient.call{value: amount}("");
-        if (!success) revert TransferFailed(recipient, amount);
     }
 
     // ============================================
@@ -245,7 +166,7 @@ contract NFTMarketplace is ReentrancyGuard {
         returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)
     {
         platformFee = salePrice.percentOf(platformFeeBps);
-        (royaltyReceiver, royaltyFee) = _getRoyaltyInfo(nftContract, tokenId, salePrice);
+        (royaltyReceiver, royaltyFee) = NFTOperations.getRoyaltyInfo(nftContract, tokenId, salePrice);
         sellerNet = salePrice - platformFee - royaltyFee;
 
         return (platformFee, royaltyFee, sellerNet, royaltyReceiver);

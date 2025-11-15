@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {IReputationManager} from "../interfaces/IReputationManager.sol";
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 import {Errors} from "../libraries/Errors.sol";
-import {RoleManager} from "../access/RoleManager.sol";
+import {BaseMarketplaceContract} from "../base/BaseMarketplaceContract.sol";
 
 /**
  * @title ReputationManager
@@ -24,7 +24,7 @@ import {RoleManager} from "../access/RoleManager.sol";
  * Good Standing: Score >= 50
  * Banned: Score <= -100 or manually banned
  */
-contract ReputationManager is IReputationManager {
+contract ReputationManager is IReputationManager, BaseMarketplaceContract {
     using AssetTypes for *;
 
     // ============================================
@@ -37,10 +37,6 @@ contract ReputationManager is IReputationManager {
     /// @notice Authorized contracts that can update reputation (e.g., MarketplaceCore, EscrowManager, AuctionManager)
     mapping(address => bool) public authorizedContracts;
 
-    /// @notice Reference to role manager
-    RoleManager public immutable roleManager;
-
-    /// @notice Reputation points per action
     int256 public constant POINTS_SUCCESSFUL_SALE = 10;
     int256 public constant POINTS_SUCCESSFUL_PURCHASE = 5;
     int256 public constant POINTS_VERIFIED_ASSET = 20;
@@ -49,24 +45,11 @@ contract ReputationManager is IReputationManager {
     int256 public constant POINTS_FRAUD = -100;
     int256 public constant POINTS_INACTIVITY_DECAY = -1;
 
-    /// @notice Inactivity period for decay (30 days)
     uint256 public constant INACTIVITY_PERIOD = 30 days;
 
-    /// @notice Ban threshold score
     int256 public constant BAN_THRESHOLD = -100;
 
-    // ============================================
-    //              CONSTRUCTOR
-    // ============================================
-
-    constructor(address _roleManager) {
-        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
-        roleManager = RoleManager(_roleManager);
-    }
-
-    // ============================================
-    //             CORE FUNCTIONS
-    // ============================================
+    constructor(address _roleManager) BaseMarketplaceContract(_roleManager) {}
 
     /**
      * @notice Update user reputation based on action
@@ -76,7 +59,6 @@ contract ReputationManager is IReputationManager {
     function updateReputation(address user, ReputationAction action) external {
         if (user == address(0)) revert Errors.InvalidUser();
 
-        // Only authorized contracts can update reputation (NOT admins to prevent manipulation)
         if (!authorizedContracts[msg.sender]) {
             revert Errors.NotAuthorized(msg.sender);
         }
@@ -129,11 +111,7 @@ contract ReputationManager is IReputationManager {
      * @param user User to ban
      * @param reason Ban reason
      */
-    function banUser(address user, string calldata reason) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-
+    function banUser(address user, string calldata reason) external onlyAdmin {
         Reputation storage rep = reputations[user];
         if (rep.isBanned) revert Errors.AlreadyBanned(user);
 
@@ -146,11 +124,7 @@ contract ReputationManager is IReputationManager {
      * @notice Unban a user (admin only)
      * @param user User to unban
      */
-    function unbanUser(address user) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-
+    function unbanUser(address user) external onlyAdmin {
         Reputation storage rep = reputations[user];
         if (!rep.isBanned) revert Errors.NotBanned(user);
 
@@ -164,10 +138,7 @@ contract ReputationManager is IReputationManager {
      * @param contractAddress Contract to authorize (e.g., MarketplaceCore, EscrowManager, AuctionManager)
      * @dev Only admin can add authorized contracts
      */
-    function addAuthorizedContract(address contractAddress) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
+    function addAuthorizedContract(address contractAddress) external onlyAdmin {
         if (contractAddress == address(0)) {
             revert Errors.ZeroAddress();
         }
@@ -185,10 +156,7 @@ contract ReputationManager is IReputationManager {
      * @param contractAddress Contract to deauthorize
      * @dev Only admin can remove authorized contracts
      */
-    function removeAuthorizedContract(address contractAddress) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
+    function removeAuthorizedContract(address contractAddress) external onlyAdmin {
         if (!authorizedContracts[contractAddress]) {
             revert Errors.NotAuthorized(contractAddress);
         }
@@ -211,9 +179,6 @@ contract ReputationManager is IReputationManager {
     //           INTERNAL FUNCTIONS
     // ============================================
 
-    /**
-     * @notice Get points for a reputation action
-     */
     function _getPointsForAction(ReputationAction action) internal pure returns (int256) {
         if (action == ReputationAction.SuccessfulSale) {
             return POINTS_SUCCESSFUL_SALE;
@@ -234,9 +199,6 @@ contract ReputationManager is IReputationManager {
         revert InvalidReputationAction();
     }
 
-    /**
-     * @notice Apply inactivity decay to reputation
-     */
     function _applyInactivityDecay(address user) internal {
         Reputation storage rep = reputations[user];
 
@@ -254,31 +216,21 @@ contract ReputationManager is IReputationManager {
     //          VIEW FUNCTIONS
     // ============================================
 
-    /**
-     * @notice Get full reputation data for user
-     */
     function getReputation(address user) external view returns (Reputation memory) {
         return reputations[user];
     }
 
-    /**
-     * @notice Get reputation score (with decay applied)
-     */
     function getReputationScore(address user) external view returns (int256) {
         Reputation memory rep = reputations[user];
 
         if (rep.lastActivityTime == 0) return 100; // New user
 
-        // Calculate decay
         uint256 inactiveDays = (block.timestamp - rep.lastActivityTime) / INACTIVITY_PERIOD;
         int256 decayPoints = int256(inactiveDays) * POINTS_INACTIVITY_DECAY;
 
         return rep.score + decayPoints;
     }
 
-    /**
-     * @notice Check if user is in good standing
-     */
     function isGoodStanding(address user) external view returns (bool) {
         Reputation memory rep = reputations[user];
 
@@ -288,9 +240,6 @@ contract ReputationManager is IReputationManager {
         return currentScore >= AssetTypes.MIN_GOOD_STANDING_SCORE;
     }
 
-    /**
-     * @notice Check if user is banned
-     */
     function isBanned(address user) external view returns (bool) {
         return reputations[user].isBanned;
     }

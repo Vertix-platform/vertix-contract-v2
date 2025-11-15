@@ -24,3 +24,6 @@ gas-report.txt
 
 # Temporary files
 /tmp/
+
+.DS_Store
+*/.DS_Store

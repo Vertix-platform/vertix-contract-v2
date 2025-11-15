@@ -16,10 +16,10 @@ contract MockNFTMarketplace is INFTMarketplace {
     function executePurchase(
         address buyer,
         address seller,
-        address nftContract,
-        uint256 tokenId,
-        uint256 quantity,
-        AssetTypes.TokenStandard standard
+        address, /* nftContract */
+        uint256, /* tokenId */
+        uint256, /* quantity */
+        AssetTypes.TokenStandard /* standard */
     )
         external
         payable
@@ -30,12 +30,12 @@ contract MockNFTMarketplace is INFTMarketplace {
     }
 
     function calculatePaymentDistribution(
-        address nftContract,
-        uint256 tokenId,
+        address, /* nftContract */
+        uint256, /* tokenId */
         uint256 salePrice
     )
         external
-        view
+        pure
         returns (uint256 platformFee, uint256 royaltyFee, uint256 sellerNet, address royaltyReceiver)
     {
         return (0, 0, salePrice, address(0));

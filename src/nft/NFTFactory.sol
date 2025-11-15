@@ -22,19 +22,15 @@ contract NFTFactory is ReentrancyGuard {
     //            STATE VARIABLES
     // ============================================
 
-    /// @notice ERC-721 implementation contract
     address public immutable nft721Implementation;
 
-    /// @notice ERC-1155 implementation contract
     address public immutable nft1155Implementation;
 
-    /// @notice Role manager reference
     RoleManager public immutable roleManager;
 
     /// @notice Creation fee (optional)
     uint256 public creationFee;
 
-    /// @notice All deployed collections
     address[] public allCollections;
 
     /// @notice Creator => their collections
@@ -57,9 +53,6 @@ contract NFTFactory is ReentrancyGuard {
         if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
         roleManager = RoleManager(_roleManager);
 
-        // Deploy implementation contracts
-        // Note: These will have _disableInitializers() called in their constructors
-        // to prevent the implementation from being initialized
         nft721Implementation = address(new VertixNFT721());
         nft1155Implementation = address(new VertixNFT1155());
     }
@@ -134,10 +127,8 @@ contract NFTFactory is ReentrancyGuard {
         }
         if (bytes(name).length == 0) revert Errors.EmptyString("name");
 
-        // Clone implementation
         collection = nft1155Implementation.clone();
 
-        // Initialize the clone with provided parameters
         VertixNFT1155(collection).initialize(
             name,
             symbol,
@@ -147,7 +138,6 @@ contract NFTFactory is ReentrancyGuard {
             royaltyFeeBps
         );
 
-        // Track collection
         allCollections.push(collection);
         creatorCollections[msg.sender].push(collection);
         isVertixCollection[collection] = true;

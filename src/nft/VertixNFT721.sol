@@ -13,6 +13,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 import {PercentageMath} from "../libraries/PercentageMath.sol";
 import {Errors} from "../libraries/Errors.sol";
+import {RoyaltyValidator} from "../libraries/RoyaltyValidator.sol";
 
 /**
  * @title VertixNFT721
@@ -116,8 +117,8 @@ contract VertixNFT721 is
         external
         initializer
     {
-        // Validate creator
-        if (creator_ == address(0)) revert Errors.InvalidCreator();
+        // Validate initialization parameters
+        RoyaltyValidator.validateInitialization(creator_, royaltyReceiver_, royaltyFeeBps_);
 
         // Initialize parent contracts
         __ERC721_init(name_, symbol_);
@@ -127,15 +128,8 @@ contract VertixNFT721 is
         __Ownable_init(creator_);
         __Pausable_init();
 
-        // Validate and set royalty
-        if (royaltyFeeBps_ > AssetTypes.MAX_ROYALTY_BPS) {
-            revert InvalidRoyalty(royaltyFeeBps_);
-        }
-
+        // Set royalty if provided
         if (royaltyFeeBps_ > 0) {
-            if (royaltyReceiver_ == address(0)) {
-                revert Errors.InvalidRoyaltyReceiver();
-            }
             _setDefaultRoyalty(royaltyReceiver_, royaltyFeeBps_);
         }
 
@@ -220,9 +214,7 @@ contract VertixNFT721 is
      * @param feeBps Fee in basis points (max 1000 = 10%)
      */
     function setDefaultRoyalty(address receiver, uint96 feeBps) external onlyOwner {
-        if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
-            revert InvalidRoyalty(feeBps);
-        }
+        RoyaltyValidator.validateRoyaltyFee(feeBps);
 
         _setDefaultRoyalty(receiver, feeBps);
 
@@ -236,9 +228,7 @@ contract VertixNFT721 is
      * @param feeBps Fee in basis points
      */
     function setTokenRoyalty(uint256 tokenId, address receiver, uint96 feeBps) external onlyOwner {
-        if (feeBps > AssetTypes.MAX_ROYALTY_BPS) {
-            revert InvalidRoyalty(feeBps);
-        }
+        RoyaltyValidator.validateRoyaltyFee(feeBps);
 
         _setTokenRoyalty(tokenId, receiver, feeBps);
     }

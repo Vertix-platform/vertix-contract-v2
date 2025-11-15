@@ -2,13 +2,14 @@
 pragma solidity ^0.8.24;
 
 import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IFeeDistributor} from "../interfaces/IFeeDistributor.sol";
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 import {PercentageMath} from "../libraries/PercentageMath.sol";
 import {Errors} from "../libraries/Errors.sol";
-import {RoleManager} from "../access/RoleManager.sol";
+import {NFTOperations} from "../libraries/NFTOperations.sol";
+import {PaymentUtils} from "../libraries/PaymentUtils.sol";
+import {BaseMarketplaceContract} from "../base/BaseMarketplaceContract.sol";
 
 /**
  * @title FeeDistributor
@@ -21,7 +22,7 @@ import {RoleManager} from "../access/RoleManager.sol";
  * 3. Remaining amount goes to seller
  * 4. Distribute to all recipients
  */
-contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
+contract FeeDistributor is IFeeDistributor, BaseMarketplaceContract {
     using PercentageMath for uint256;
     using ERC165Checker for address;
 
@@ -29,32 +30,27 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
     //             STATE VARIABLES
     // ============================================
 
-    /// @notice Platform fee in basis points (250 = 2.5%)
     uint256 public platformFeeBps;
 
-    /// @notice Address receiving platform fees
     address public feeCollector;
 
-    /// @notice Reference to role manager for access control
-    RoleManager public immutable roleManager;
-
-    /// @notice Accumulated fees available for withdrawal
     uint256 public accumulatedFees;
 
-    /// @notice ERC-2981 interface ID
     bytes4 private constant INTERFACE_ID_ERC2981 = 0x2a55205a;
 
-    constructor(address _roleManager, address _feeCollector, uint256 _platformFeeBps) {
-        if (_roleManager == address(0)) {
-            revert Errors.InvalidRoleManager();
-        }
+    constructor(
+        address _roleManager,
+        address _feeCollector,
+        uint256 _platformFeeBps
+    )
+        BaseMarketplaceContract(_roleManager)
+    {
         if (_feeCollector == address(0)) {
             revert Errors.InvalidFeeDistributor();
         }
 
         PercentageMath.validateBps(_platformFeeBps, AssetTypes.MAX_FEE_BPS);
 
-        roleManager = RoleManager(_roleManager);
         feeCollector = _feeCollector;
         platformFeeBps = _platformFeeBps;
 
@@ -92,10 +88,8 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
             revert InvalidSeller();
         }
 
-        // Calculate platform fee
         uint256 platformFee = amount.percentOf(platformFeeBps);
 
-        // Validate royalty amount doesn't exceed limits
         if (royaltyAmount > 0) {
             if (royaltyReceiver == address(0)) {
                 revert InvalidRoyaltyReceiver();
@@ -106,24 +100,19 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
             }
         }
 
-        // Validate that fees don't exceed the sale amount (prevent underflow)
         if (platformFee + royaltyAmount > amount) {
             revert InvalidFeeBps(platformFee + royaltyAmount);
         }
 
-        // Calculate seller net
         uint256 sellerNet = amount - platformFee - royaltyAmount;
 
-        // Accumulate platform fee (pull pattern)
         accumulatedFees += platformFee;
 
-        // Transfer royalty if applicable
         if (royaltyAmount > 0) {
-            _safeTransfer(royaltyReceiver, royaltyAmount);
+            PaymentUtils.safeTransferETH(royaltyReceiver, royaltyAmount);
         }
 
-        // Transfer to seller
-        _safeTransfer(seller, sellerNet);
+        PaymentUtils.safeTransferETH(seller, sellerNet);
 
         emit PaymentDistributed(seller, msg.sender, amount, platformFee, royaltyAmount, sellerNet);
     }
@@ -144,16 +133,13 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
         view
         returns (PaymentDistribution memory distribution)
     {
-        // Calculate platform fee
         distribution.platformFee = amount.percentOf(platformFeeBps);
 
-        // Try to get royalty info (ERC-2981)
-        (address royaltyReceiver, uint256 royaltyAmount) = _getRoyaltyInfo(nftContract, tokenId, amount);
+        (address royaltyReceiver, uint256 royaltyAmount) = NFTOperations.getRoyaltyInfo(nftContract, tokenId, amount);
 
         distribution.royaltyReceiver = royaltyReceiver;
         distribution.royaltyFee = royaltyAmount;
 
-        // Calculate seller net
         distribution.sellerNet = amount - distribution.platformFee - distribution.royaltyFee;
 
         return distribution;
@@ -163,11 +149,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @notice Update platform fee (FEE_MANAGER_ROLE only)
      * @param newFeeBps New fee in basis points
      */
-    function updatePlatformFee(uint256 newFeeBps) external {
-        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
-            revert Errors.NotFeeManager(msg.sender);
-        }
-
+    function updatePlatformFee(uint256 newFeeBps) external onlyFeeManager {
         PercentageMath.validateBps(newFeeBps, AssetTypes.MAX_FEE_BPS);
 
         uint256 oldFee = platformFeeBps;
@@ -180,11 +162,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @notice Update fee collector address (FEE_MANAGER_ROLE only)
      * @param newCollector New fee collector address
      */
-    function updateFeeCollector(address newCollector) external {
-        if (!roleManager.hasRole(roleManager.FEE_MANAGER_ROLE(), msg.sender)) {
-            revert Errors.NotFeeManager(msg.sender);
-        }
-
+    function updateFeeCollector(address newCollector) external onlyFeeManager {
         if (newCollector == address(0)) revert InvalidFeeCollector();
 
         address oldCollector = feeCollector;
@@ -209,7 +187,7 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
 
         accumulatedFees = 0;
 
-        _safeTransfer(feeCollector, amount);
+        PaymentUtils.safeTransferETH(feeCollector, amount);
 
         emit FeesWithdrawn(feeCollector, amount);
     }
@@ -231,62 +209,9 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
 
         accumulatedFees -= amount;
 
-        _safeTransfer(feeCollector, amount);
+        PaymentUtils.safeTransferETH(feeCollector, amount);
 
         emit FeesWithdrawn(feeCollector, amount);
-    }
-
-    // ============================================
-    //           INTERNAL FUNCTIONS
-    // ============================================
-
-    /**
-     * @notice Get royalty info from ERC-2981 contract
-     * @param nftContract NFT contract address
-     * @param tokenId Token ID
-     * @param salePrice Sale price
-     * @return receiver Royalty receiver address
-     * @return royaltyAmount Royalty amount
-     * @dev Returns (address(0), 0) if contract doesn't support ERC-2981
-     */
-    function _getRoyaltyInfo(
-        address nftContract,
-        uint256 tokenId,
-        uint256 salePrice
-    )
-        internal
-        view
-        returns (address receiver, uint256 royaltyAmount)
-    {
-        // Check if contract supports ERC-2981
-        if (!nftContract.supportsInterface(INTERFACE_ID_ERC2981)) {
-            return (address(0), 0);
-        }
-
-        // Try to get royalty info
-        try IERC2981(nftContract).royaltyInfo(tokenId, salePrice) returns (address _receiver, uint256 _royaltyAmount) {
-            // Validate royalty doesn't exceed maximum
-            uint256 maxRoyalty = salePrice.percentOf(AssetTypes.MAX_ROYALTY_BPS);
-            if (_royaltyAmount > maxRoyalty) {
-                _royaltyAmount = maxRoyalty;
-            }
-
-            return (_receiver, _royaltyAmount);
-        } catch {
-            return (address(0), 0);
-        }
-    }
-
-    /**
-     * @notice Safe ETH transfer with proper error handling
-     * @param recipient Recipient address
-     * @param amount Amount to transfer
-     */
-    function _safeTransfer(address recipient, uint256 amount) internal {
-        if (amount == 0) return;
-
-        (bool success,) = recipient.call{value: amount}("");
-        if (!success) revert DistributionFailed(recipient, amount);
     }
 
     // ============================================
@@ -319,6 +244,6 @@ contract FeeDistributor is IFeeDistributor, ReentrancyGuard {
      * @return True if supports ERC-2981
      */
     function supportsRoyalties(address nftContract) external view returns (bool) {
-        return nftContract.supportsInterface(INTERFACE_ID_ERC2981);
+        return NFTOperations.supportsRoyalties(nftContract);
     }
 }

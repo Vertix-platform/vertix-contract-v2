@@ -3,14 +3,12 @@ pragma solidity ^0.8.24;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IMarketplace} from "../interfaces/IMarketplace.sol";
 import {IEscrowManager} from "../interfaces/IEscrowManager.sol";
 import {INFTMarketplace} from "../interfaces/INFTMarketplace.sol";
 import {AssetTypes} from "../libraries/AssetTypes.sol";
 import {Errors} from "../libraries/Errors.sol";
-import {RoleManager} from "../access/RoleManager.sol";
+import {BaseMarketplaceContract} from "../base/BaseMarketplaceContract.sol";
 
 /**
  * @title MarketplaceCore
@@ -22,7 +20,7 @@ import {RoleManager} from "../access/RoleManager.sol";
  * - NFTs (ERC721/1155) → NFTMarketplace.executePurchase()
  * - Off-chain assets → EscrowManager.createEscrow()
  */
-contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
+contract MarketplaceCore is IMarketplace, BaseMarketplaceContract {
     using AssetTypes for AssetTypes.AssetType;
 
     // ============================================
@@ -45,7 +43,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
     mapping(uint256 => NFTDetails) public nftDetails;
     mapping(address => uint256[]) public sellerListings;
 
-    RoleManager public immutable roleManager;
     IEscrowManager public immutable escrowManager;
     INFTMarketplace public immutable nftMarketplace;
 
@@ -70,14 +67,18 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
 
     event PriceUpdated(uint256 indexed listingId, uint256 oldPrice, uint256 newPrice);
 
-    constructor(address _roleManager, address _escrowManager, address _nftMarketplace) {
-        if (_roleManager == address(0)) revert Errors.InvalidRoleManager();
+    constructor(
+        address _roleManager,
+        address _escrowManager,
+        address _nftMarketplace
+    )
+        BaseMarketplaceContract(_roleManager)
+    {
         if (_escrowManager == address(0)) revert Errors.InvalidEscrowManager();
         if (_nftMarketplace == address(0)) {
             revert Errors.InvalidNFTMarketplace();
         }
 
-        roleManager = RoleManager(_roleManager);
         escrowManager = IEscrowManager(_escrowManager);
         nftMarketplace = INFTMarketplace(_nftMarketplace);
     }
@@ -110,7 +111,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
             revert InvalidNFTParameters();
         }
 
-        // Verify ownership and approval
         if (standard == AssetTypes.TokenStandard.ERC721) {
             if (quantity != 1) revert InvalidNFTParameters();
             if (IERC721(nftContract).ownerOf(tokenId) != msg.sender) {
@@ -133,11 +133,9 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         listingCounter++;
         listingId = listingCounter;
 
-        // Determine asset type
         AssetTypes.AssetType assetType =
             standard == AssetTypes.TokenStandard.ERC721 ? AssetTypes.AssetType.NFT721 : AssetTypes.AssetType.NFT1155;
 
-        // Create listing
         listings[listingId] = Listing({
             listingId: listingId,
             seller: msg.sender,
@@ -149,7 +147,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
             metadataURI: ""
         });
 
-        // Store NFT details
         nftDetails[listingId] = NFTDetails({
             nftContract: nftContract,
             tokenId: uint64(tokenId),
@@ -226,16 +223,13 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         if (msg.value != listing.price) revert IncorrectPayment();
         if (msg.sender == listing.seller) revert CannotBuyOwnListing();
 
-        // Route to appropriate handler
         if (listing.assetType.isNFTType()) {
-            // NFT - delegate to NFTMarketplace
             NFTDetails memory nft = nftDetails[listingId];
 
             nftMarketplace.executePurchase{value: msg.value}(
                 msg.sender, listing.seller, nft.nftContract, nft.tokenId, nft.quantity, nft.standard
             );
         } else {
-            // Off-chain asset - create escrow
             uint256 duration = listing.assetType.recommendedEscrowDuration();
 
             escrowManager.createEscrow{value: msg.value}(
@@ -243,7 +237,6 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
             );
         }
 
-        // Mark as sold
         listing.status = AssetTypes.ListingStatus.Sold;
 
         emit ListingSold(listingId, msg.sender, listing.seller, listing.price);
@@ -288,37 +281,16 @@ contract MarketplaceCore is IMarketplace, ReentrancyGuard, Pausable {
         emit PriceUpdated(listingId, oldPrice, newPrice);
     }
 
-    function addAuthorizedCaller(address caller) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
+    function addAuthorizedCaller(address caller) external onlyAdmin {
         if (caller == address(0)) revert Errors.ZeroAddress();
 
         authorizedCallers[caller] = true;
         emit AuthorizedCallerAdded(caller);
     }
 
-    function removeAuthorizedCaller(address caller) external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-
+    function removeAuthorizedCaller(address caller) external onlyAdmin {
         authorizedCallers[caller] = false;
         emit AuthorizedCallerRemoved(caller);
-    }
-
-    function pause() external {
-        if (!roleManager.hasRole(roleManager.PAUSER_ROLE(), msg.sender)) {
-            revert Errors.NotPauser(msg.sender);
-        }
-        _pause();
-    }
-
-    function unpause() external {
-        if (!roleManager.hasRole(roleManager.ADMIN_ROLE(), msg.sender)) {
-            revert Errors.NotAdmin(msg.sender);
-        }
-        _unpause();
     }
 
     // ============================================

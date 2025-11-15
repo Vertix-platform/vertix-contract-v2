@@ -317,7 +317,7 @@ contract OfferManagerTest is Test {
         mockNFT721.approve(address(offerManager), 1);
 
         uint256 sellerBalanceBefore = seller.balance;
-        uint256 buyerBalanceBefore = buyer.balance;
+        // uint256 buyerBalanceBefore = buyer.balance;
 
         // Seller accepts offer
         vm.expectEmit(true, true, true, true);

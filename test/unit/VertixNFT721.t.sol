@@ -105,7 +105,7 @@ contract VertixNFT721Test is Test {
             BASE_URI
         );
 
-        vm.expectRevert(abi.encodeWithSelector(VertixNFT721.InvalidRoyalty.selector, 1500));
+        vm.expectRevert(abi.encodeWithSelector(Errors.RoyaltyTooHigh.selector, 1500, 1000));
         new ERC1967Proxy(address(impl), initData);
     }
 
@@ -356,7 +356,7 @@ contract VertixNFT721Test is Test {
 
     function test_SetDefaultRoyalty_RevertsOnExcessiveFee() public {
         vm.prank(creator);
-        vm.expectRevert(abi.encodeWithSelector(VertixNFT721.InvalidRoyalty.selector, 1500));
+        vm.expectRevert(abi.encodeWithSelector(Errors.RoyaltyTooHigh.selector, 1500, 1000));
         nft.setDefaultRoyalty(royaltyReceiver, 1500);
     }
 
@@ -382,7 +382,7 @@ contract VertixNFT721Test is Test {
 
     function test_SetTokenRoyalty_RevertsOnExcessiveFee() public {
         vm.prank(creator);
-        vm.expectRevert(abi.encodeWithSelector(VertixNFT721.InvalidRoyalty.selector, 1500));
+        vm.expectRevert(abi.encodeWithSelector(Errors.RoyaltyTooHigh.selector, 1500, 1000));
         nft.setTokenRoyalty(1, royaltyReceiver, 1500);
     }
 
