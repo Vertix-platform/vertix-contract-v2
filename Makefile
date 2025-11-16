@@ -3,10 +3,6 @@
 
 help:
 	@echo ""
-	@echo "╔════════════════════════════════════════════════════════╗"
-	@echo "║         Vertix Contract - Development Tasks           ║"
-	@echo "╚════════════════════════════════════════════════════════╝"
-	@echo ""
 	@echo "Setup:"
 	@echo "  make install          Install git hooks"
 	@echo ""
@@ -68,7 +64,6 @@ test-match:
 	@echo "Running specific test..."
 	@forge test --match-test $(TEST) -vvv
 
-# Coverage
 coverage:
 	@echo "Generating coverage report..."
 	@forge coverage
@@ -78,7 +73,6 @@ coverage-report:
 	@forge coverage --report lcov
 	@echo "Coverage report saved to lcov.info"
 
-# Gas
 snapshot:
 	@echo "Updating gas snapshot..."
 	@forge snapshot
@@ -95,7 +89,6 @@ gas-report:
 	@echo "Generating gas report..."
 	@forge test --gas-report | tee gas-report.txt
 
-# Validation
 validate:
 	@chmod +x scripts/validate.sh
 	@./scripts/validate.sh
@@ -107,7 +100,6 @@ validate-v:
 check: fmt-check build
 	@echo "✓ Quick check passed!"
 
-# Cleanup
 clean:
 	@echo "Cleaning build artifacts..."
 	@forge clean
@@ -118,10 +110,9 @@ clean-all: clean
 	@rm -f .gas-snapshot
 	@rm -rf coverage/
 
-# Deployment helpers
 deploy-local:
 	@echo "Deploying to local network..."
-	@forge script script/Deploy.s.sol --rpc-url localhost --broadcast
+	@forge script script/DeployVertix.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 
 deploy-testnet:
 	@echo "Deploying to testnet..."

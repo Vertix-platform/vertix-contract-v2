@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Script} from "forge-std/Script.sol";
+import {Script, console} from "forge-std/Script.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
 import {RoleManager} from "../src/access/RoleManager.sol";
 import {FeeDistributor} from "../src/core/FeeDistributor.sol";
@@ -68,6 +68,20 @@ contract DeployVertix is Script {
             new AuctionManager(address(roleManager), address(feeDistributor), address(escrowManager), platformFeeBps);
 
         vm.stopBroadcast();
+
+        console.log("Deployed Addresses:");
+        console.log("RoleManager:", address(roleManager));
+        console.log("FeeDistributor:", address(feeDistributor));
+        console.log("VerificationRegistry:", address(verificationRegistry));
+        console.log("ReputationManager:", address(reputationManager));
+        console.log("EscrowManager:", address(escrowManager));
+        console.log("NFTFactory:", address(nftFactory));
+        console.log("  NFT721 Implementation:", nftFactory.nft721Implementation());
+        console.log("  NFT1155 Implementation:", nftFactory.nft1155Implementation());
+        console.log("NFTMarketplace:", address(nftMarketplace));
+        console.log("MarketplaceCore:", address(marketplaceCore));
+        console.log("OfferManager:", address(offerManager));
+        console.log("AuctionManager:", address(auctionManager));
 
         return DeployedContracts({
             roleManager: roleManager,
