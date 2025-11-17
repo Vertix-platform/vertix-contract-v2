@@ -67,6 +67,20 @@ contract DeployVertix is Script {
         AuctionManager auctionManager =
             new AuctionManager(address(roleManager), address(feeDistributor), address(escrowManager), platformFeeBps);
 
+        roleManager.scheduleRoleGrant(roleManager.ARBITRATOR_ROLE(), admin);
+        roleManager.scheduleRoleGrant(roleManager.VERIFIER_ROLE(), admin);
+
+        escrowManager.addAuthorizedMarketplace(address(marketplaceCore));
+        escrowManager.addAuthorizedMarketplace(address(offerManager));
+        escrowManager.addAuthorizedMarketplace(address(auctionManager));
+
+        marketplaceCore.addAuthorizedCaller(address(offerManager));
+
+        verificationRegistry.addVerifier(admin);
+
+        reputationManager.addAuthorizedContract(address(escrowManager));
+        reputationManager.addAuthorizedContract(address(marketplaceCore));
+
         vm.stopBroadcast();
 
         console.log("Deployed Addresses:");

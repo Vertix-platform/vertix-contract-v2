@@ -1,5 +1,6 @@
 
 .PHONY: help install test build coverage validate fmt clean snapshot
+include .env
 
 help:
 	@echo ""
@@ -116,7 +117,11 @@ deploy-local:
 
 deploy-testnet:
 	@echo "Deploying to testnet..."
-	@forge script script/Deploy.s.sol --rpc-url $(RPC_URL) --broadcast --verify
+	@forge script script/DeployVertix.s.sol --rpc-url $(BASE_SEPOLIA_RPC) --broadcast --verify --account deployer
+
+deploy-mainnet:
+	@echo "Deploying to testnet..."
+	@PRIVATE_KEY=$(PRIVATE_KEY) forge script script/DeployVertix.s.sol --rpc-url $(BASE_MAINNET_RPC) --broadcast --verify
 
 update:
 	@echo "Updating dependencies..."

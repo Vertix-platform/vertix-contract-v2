@@ -36,7 +36,7 @@ contract HelperConfig is Script {
         }
         return NetworkConfig({
             admin: vm.envAddress("ADMIN_ADDRESS"),
-            feeCollector: vm.envAddress("FEE_COLLECTOR_ADDRESS"),
+            feeCollector: vm.envAddress("ADMIN_ADDRESS"),
             platformFeeBps: DEFAULT_PLATFORM_FEE_BPS,
             deployerKey: deployerKey
         });
@@ -49,7 +49,7 @@ contract HelperConfig is Script {
         }
         return NetworkConfig({
             admin: vm.envAddress("ADMIN_ADDRESS"),
-            feeCollector: vm.envAddress("FEE_COLLECTOR_ADDRESS"),
+            feeCollector: vm.envAddress("ADMIN_ADDRESS"),
             platformFeeBps: DEFAULT_PLATFORM_FEE_BPS,
             deployerKey: deployerKey
         });
