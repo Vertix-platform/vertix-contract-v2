@@ -183,3 +183,24 @@ When contributing to this project:
 ## License
 
 MIT License
+
+  Deployed Addresses:
+  RoleManager: 0x7101c1FA43c1ec3acC81CC5cCf5072265eCF4b76
+  FeeDistributor: 0x8575E4322d6a67d63E567663F36Cb08886D89a6A
+  VerificationRegistry: 0x92dBD77b90dbEb203c37Ce7C5b095eaDE9D17e42
+  ReputationManager: 0x29cDaD5194854D2063da1B751DBAB7fAC7B3b9FC
+  EscrowManager: 0x393a08a772E20C2804452713CE444153903fFCB8
+  NFTFactory: 0xB46813BaB10187542a29a09e60258Fd7Fc3526B2
+    NFT721 Implementation: 0x4d529f71B2Ba1fba218073d810Ccf933Fc8711d4
+    NFT1155 Implementation: 0x88524F24a33E1af6C40980BD7C9B2f145F627a6F
+  NFTMarketplace: 0xbC16a2aCaC1F3Bb7e5A01bbC51616cf6187aDC6a
+  MarketplaceCore: 0x2d5afd37eCDD11F674FBBcBf4ddc458bA5F34AC8
+  OfferManager: 0x43d0e03da53A54Ac996434eb5C5060f305612935
+  AuctionManager: 0x21D6d00678f6F7fb378Eb4881336155B988a3b7a
+  
+### After 24 hours, run:
+  cast send <ROLEMANAGER_ADDRESS> "executeRoleGrant(bytes32,address)" <ARBITRATOR_ROLE_HASH> <ADMIN_ADDRESS> --rpc-url <RPC_URL> --private-key <PRIVATE_KEY>
+
+#### Get the role hash with:
+cast keccak "ARBITRATOR_ROLE"
+cast keccak "VERIFIER_ROLE"

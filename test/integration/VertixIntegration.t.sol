@@ -53,21 +53,11 @@ contract VertixIntegrationTest is Test {
     function _setupAuthorizations() internal {
         vm.startPrank(admin);
 
-        contracts.roleManager.grantRole(contracts.roleManager.DEFAULT_ADMIN_ROLE(), admin);
-        contracts.roleManager.grantRole(contracts.roleManager.ARBITRATOR_ROLE(), admin);
-
-        contracts.escrowManager.addAuthorizedMarketplace(address(contracts.marketplaceCore));
-        contracts.escrowManager.addAuthorizedMarketplace(address(contracts.offerManager));
-        contracts.escrowManager.addAuthorizedMarketplace(address(contracts.auctionManager));
-
-        contracts.marketplaceCore.addAuthorizedCaller(address(contracts.offerManager));
-
-        contracts.verificationRegistry.addVerifier(admin);
+        // Only add additional verifier (admin is already added in deployment)
         contracts.verificationRegistry.addVerifier(verifier);
 
+        // Add admin as authorized contract for testing reputation updates
         contracts.reputationManager.addAuthorizedContract(admin);
-        contracts.reputationManager.addAuthorizedContract(address(contracts.escrowManager));
-        contracts.reputationManager.addAuthorizedContract(address(contracts.marketplaceCore));
 
         vm.stopPrank();
     }
