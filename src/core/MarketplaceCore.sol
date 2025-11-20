@@ -162,6 +162,103 @@ contract MarketplaceCore is IMarketplace, BaseMarketplaceContract {
     }
 
     /**
+     * @notice Create NFT listing on behalf of owner (for approved operators)
+     * @param owner The owner of the NFT who will be the seller
+     * @param nftContract NFT contract address
+     * @param tokenId Token ID
+     * @param quantity Number of tokens (1 for ERC721, amount for ERC1155)
+     * @param price Listing price
+     * @param standard Token standard (ERC721 or ERC1155)
+     * @return listingId Unique listing ID
+     * @dev Caller must be approved operator for the owner
+     */
+    function createNFTListingFor(
+        address owner,
+        address nftContract,
+        uint256 tokenId,
+        uint256 quantity,
+        uint256 price,
+        AssetTypes.TokenStandard standard
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 listingId)
+    {
+        if (price == 0 || price > AssetTypes.MAX_LISTING_PRICE) {
+            revert InvalidPrice();
+        }
+        if (nftContract == address(0)) {
+            revert InvalidNFTParameters();
+        }
+        if (owner == address(0)) {
+            revert Errors.ZeroAddress();
+        }
+
+        if (standard == AssetTypes.TokenStandard.ERC721) {
+            if (quantity != 1) revert InvalidNFTParameters();
+            // Check owner owns the token
+            if (IERC721(nftContract).ownerOf(tokenId) != owner) {
+                revert NotOwner();
+            }
+            // Check caller is approved operator for owner OR token is approved to caller
+            address approved = IERC721(nftContract).getApproved(tokenId);
+            bool isApprovedForAll = IERC721(nftContract).isApprovedForAll(owner, msg.sender);
+            if (approved != msg.sender && !isApprovedForAll) {
+                revert NotApproved();
+            }
+            // Check NFTMarketplace is approved (needed for purchase transfers)
+            address marketplaceApproved = IERC721(nftContract).getApproved(tokenId);
+            bool marketplaceApprovedForAll = IERC721(nftContract).isApprovedForAll(owner, address(nftMarketplace));
+            if (marketplaceApproved != address(nftMarketplace) && !marketplaceApprovedForAll) {
+                revert NotApproved();
+            }
+        } else {
+            if (quantity == 0) revert InvalidNFTParameters();
+            uint256 balance = IERC1155(nftContract).balanceOf(owner, tokenId);
+            if (balance < quantity) revert InsufficientBalance();
+            // Check caller is approved operator for owner
+            if (!IERC1155(nftContract).isApprovedForAll(owner, msg.sender)) {
+                revert NotApproved();
+            }
+            // Check NFTMarketplace is approved (needed for purchase transfers)
+            if (!IERC1155(nftContract).isApprovedForAll(owner, address(nftMarketplace))) {
+                revert NotApproved();
+            }
+        }
+
+        listingCounter++;
+        listingId = listingCounter;
+
+        AssetTypes.AssetType assetType =
+            standard == AssetTypes.TokenStandard.ERC721 ? AssetTypes.AssetType.NFT721 : AssetTypes.AssetType.NFT1155;
+
+        listings[listingId] = Listing({
+            listingId: listingId,
+            seller: owner, // Owner becomes the seller, not msg.sender
+            assetType: assetType,
+            price: price,
+            status: AssetTypes.ListingStatus.Active,
+            createdAt: block.timestamp,
+            assetHash: bytes32(0),
+            metadataURI: ""
+        });
+
+        nftDetails[listingId] = NFTDetails({
+            nftContract: nftContract,
+            tokenId: uint64(tokenId),
+            quantity: uint16(quantity),
+            standard: standard
+        });
+
+        sellerListings[owner].push(listingId);
+
+        emit NFTListingCreated(listingId, owner, nftContract, tokenId, quantity, price);
+
+        return listingId;
+    }
+
+    /**
      * @notice Create off-chain asset listing
      * @param assetType Type of off-chain asset
      * @param price Listing price

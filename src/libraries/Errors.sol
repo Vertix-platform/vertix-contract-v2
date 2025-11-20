@@ -132,4 +132,25 @@ library Errors {
 
     /// @notice Invalid asset type provided
     error InvalidAssetType(uint8 assetType);
+
+    /// @notice Invalid amount provided
+    error InvalidAmount();
+
+    /// @notice Caller is not authorized for this action
+    error UnauthorizedCaller(address caller);
+
+    /// @notice Exceeds maximum supply
+    error ExceedsMaxSupply();
+
+    /// @notice Empty array provided
+    error EmptyArray();
+
+    /// @notice Array length mismatch
+    error ArrayLengthMismatch();
+
+    /// @notice Array too large
+    error ArrayTooLarge(uint256 length, uint256 max);
+
+    /// @notice Not approved for operation
+    error NotApproved();
 }

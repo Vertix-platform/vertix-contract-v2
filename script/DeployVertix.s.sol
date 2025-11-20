@@ -11,6 +11,9 @@ import {EscrowManager} from "../src/escrow/EscrowManager.sol";
 import {MarketplaceCore} from "../src/core/MarketplaceCore.sol";
 import {NFTMarketplace} from "../src/nft/NFTMarketplace.sol";
 import {NFTFactory} from "../src/nft/NFTFactory.sol";
+import {VertixSinglesNFT721} from "../src/nft/VertixSinglesNFT721.sol";
+import {VertixSinglesNFT1155} from "../src/nft/VertixSinglesNFT1155.sol";
+import {SinglesNFTHelper} from "../src/nft/SinglesNFTHelper.sol";
 import {OfferManager} from "../src/core/OfferManager.sol";
 import {AuctionManager} from "../src/core/AuctionManager.sol";
 
@@ -24,6 +27,9 @@ contract DeployVertix is Script {
         MarketplaceCore marketplaceCore;
         NFTMarketplace nftMarketplace;
         NFTFactory nftFactory;
+        VertixSinglesNFT721 singlesNFT721;
+        VertixSinglesNFT1155 singlesNFT1155;
+        SinglesNFTHelper singlesHelper;
         OfferManager offerManager;
         AuctionManager auctionManager;
     }
@@ -47,8 +53,18 @@ contract DeployVertix is Script {
 
         NFTFactory nftFactory = new NFTFactory(address(roleManager));
 
+        // Deploy shared collections for single NFTs (industry-standard approach)
+        VertixSinglesNFT721 singlesNFT721 = new VertixSinglesNFT721();
+        singlesNFT721.initialize("Vertix Singles", "VSINGLE", admin);
+
+        VertixSinglesNFT1155 singlesNFT1155 = new VertixSinglesNFT1155();
+        singlesNFT1155.initialize("Vertix Editions", "VEDITION", "", admin);
+
         address futureMarketplaceCore =
-            vm.computeCreateAddress(vm.addr(deployerKey), vm.getNonce(vm.addr(deployerKey)) + 1);
+            vm.computeCreateAddress(vm.addr(deployerKey), vm.getNonce(vm.addr(deployerKey)) + 2);
+
+        SinglesNFTHelper singlesHelper =
+            new SinglesNFTHelper(address(singlesNFT721), address(singlesNFT1155), futureMarketplaceCore);
 
         NFTMarketplace nftMarketplace =
             new NFTMarketplace(futureMarketplaceCore, address(feeDistributor), platformFeeBps);
@@ -92,6 +108,9 @@ contract DeployVertix is Script {
         console.log("NFTFactory:", address(nftFactory));
         console.log("  NFT721 Implementation:", nftFactory.nft721Implementation());
         console.log("  NFT1155 Implementation:", nftFactory.nft1155Implementation());
+        console.log("VertixSinglesNFT721 (Shared Collection):", address(singlesNFT721));
+        console.log("VertixSinglesNFT1155 (Shared Editions):", address(singlesNFT1155));
+        console.log("SinglesNFTHelper (Mint & List Helper):", address(singlesHelper));
         console.log("NFTMarketplace:", address(nftMarketplace));
         console.log("MarketplaceCore:", address(marketplaceCore));
         console.log("OfferManager:", address(offerManager));
@@ -106,6 +125,9 @@ contract DeployVertix is Script {
             marketplaceCore: marketplaceCore,
             nftMarketplace: nftMarketplace,
             nftFactory: nftFactory,
+            singlesNFT721: singlesNFT721,
+            singlesNFT1155: singlesNFT1155,
+            singlesHelper: singlesHelper,
             offerManager: offerManager,
             auctionManager: auctionManager
         });
